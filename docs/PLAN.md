@@ -19,7 +19,7 @@ game state and performing safe rule-based actions.
 |---|------|--------|-------|-------|
 | 1 | Multiple named visual detectors per game profile | Pure logic done | Codex (PR #5) | `vision/detector_registry.py`. Not yet wired into the live Tk capture loop — that's task 11. |
 | 2 | Configurable regions of interest (ROI) | Done | Codex (PR #5) | ROI → full-frame bbox translation, with tests. |
-| 3 | HP/resource bar measurement | Not started | Unassigned | Pure logic, no machine needed — good Codex candidate. |
+| 3 | HP/resource bar measurement | Pure logic done — pending merge | Codex (`codex/v0.3-resource-bars`) | HSV/ROI measurement for horizontal/vertical bars, four fill directions, multiple color ranges, gap tolerance, confidence, GameState bridge, synthetic tests. |
 | 4 | Basic OCR for simple text/numbers | Not started | Unassigned | Pure logic (given a frame/ROI in, text out) — good Codex candidate; picking an OCR dependency needs a quick decision first. |
 | 5 | Persistent game-state variables | Done | Codex (PR #2) | `agent/game_state.py` (`GameState`, `Observation`). |
 | 6 | Safe rule engine (`IF X.visible THEN click`) | Done | Codex (PR #2) | `agent/rule_engine.py` (`RuleEngine`, `VisibilityRule`). Produces `ActionIntent`s only — nothing dispatches them yet. |
@@ -35,7 +35,7 @@ not from Issue #1's original scope — tracked here so they don't get lost:
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Not started — **next up** | Claude | Needs machine access to smoke-test. Scope guard: no autonomous input yet, F8/input behavior unchanged, vision must not send input. See `docs/HANDOFF.md` "Next task". |
+| 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Assigned / starting | Claude | Needs machine access to smoke-test. Scope guard: no autonomous input yet, F8/input behavior unchanged, vision must not send input. See `docs/HANDOFF.md` "Next task". |
 | 12 | Gated action dispatcher (`ActionIntent` → `InputController`, only when input explicitly enabled) | Not started | Unassigned, likely Claude (touches `core`/input safety) | Described in `docs/ARCHITECTURE.md`. Prerequisite for tasks 8 and the acceptance criteria below. |
 
 ## Acceptance criteria (from Issue #1, unchanged)
