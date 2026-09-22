@@ -1,0 +1,25 @@
+{
+  "name": "Example Offline Game",
+  "capture_fps": 30,
+  "vision_fps": 10,
+  "emergency_stop": "F8",
+  "input_enabled_by_default": false,
+  "autonomous_actions": false,
+  "detectors": [
+    {
+      "name": "collect_button",
+      "type": "template",
+      "template": "templates/collect_button.png",
+      "threshold": 0.9,
+      "roi": [0, 0, 800, 600]
+    },
+    {
+      "name": "continue_button",
+      "type": "template",
+      "template": "templates/continue_button.png",
+      "threshold": 0.9,
+      "roi": null
+    }
+  ],
+  "notes": "v0.3 schema example only. Runtime profile loading is a later integration step."
+}
