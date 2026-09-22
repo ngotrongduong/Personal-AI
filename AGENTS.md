@@ -1,5 +1,15 @@
 # Personal Game AI — Agent Instructions
 
+## Start here
+
+Before anything else, read [`docs/HANDOFF.md`](docs/HANDOFF.md) (current open
+PRs, who owns what, active blockers) and [`docs/PLAN.md`](docs/PLAN.md) (granular
+v0.3 checklist with status/owner per task). This file (`AGENTS.md`) is the stable
+rulebook; those two are fast-changing state — update them when you finish a
+meaningful chunk of work, **in the same push**, not as an afterthought (a doc
+pushed as a later, separate commit to an already-reviewed PR can be merged out
+from under you — it happened once already, see `docs/HANDOFF.md` "Lessons").
+
 ## Mission
 
 Build a local Windows game-playing assistant that observes the screen, maintains game state, and can perform safe mouse/keyboard actions for offline/single-player games or games that explicitly permit automation.
@@ -51,6 +61,20 @@ This repo is developed by more than one AI assistant at once (Claude Code, Codex
 - Nobody pushes directly to `main` or to an active integration branch (e.g. `feature/v0.3-game-state`); every change lands through a PR.
 - Before starting a task: `git fetch` and check existing branches/open PRs to confirm the task is not already in progress on another branch.
 - PRs for v0.3 sub-tasks target `feature/v0.3-game-state`, not `main`. That branch merges into `main` only once v0.3 is complete and stable.
+
+**Default task assignment:** Claude Code's context/token budget for this repo is
+more limited per session than Codex/ChatGPT's, so route work accordingly rather
+than defaulting everything to whichever assistant is already in the conversation:
+
+- **Claude's lane:** anything that genuinely needs the user's Windows machine —
+  live GUI smoke tests, F8/input/capture verification, local tooling/CI setup,
+  anything you'd need to actually run and watch happen.
+- **Codex's lane (default):** pure logic, algorithms, data structures, tests,
+  docs, config — anything verifiable by reading code and running a test suite,
+  no machine access required. When a task doesn't clearly need a real machine,
+  it defaults here, not to Claude.
+- When a task is unclear, say so in `docs/HANDOFF.md`/the tracking issue and let
+  it get picked up rather than either assistant guessing.
 
 ```
 main
