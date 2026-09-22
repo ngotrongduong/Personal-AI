@@ -1,0 +1,10 @@
+{
+  "name": "Example Offline Game",
+  "capture_fps": 30,
+  "vision_fps": 10,
+  "template_threshold": 0.82,
+  "emergency_stop": "F8",
+  "input_enabled_by_default": false,
+  "autonomous_actions": false,
+  "notes": "v0.2 supports manual template selection and real-time template detection only."
+}
