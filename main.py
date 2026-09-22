@@ -315,7 +315,11 @@ class PersonalGameAIApp:
             self.input.tap_key("w", 0.25)
             self.root.after(0, lambda: self.log("Test W completed."))
         except Exception as exc:
-            self.root.after(0, lambda: self.log(f"Input error: {exc}"))
+            # `exc` is unbound by Python as soon as this except block exits, but
+            # root.after runs the lambda later on the Tk main thread — capture the
+            # message now so the deferred callback doesn't hit a NameError.
+            message = str(exc)
+            self.root.after(0, lambda: self.log(f"Input error: {message}"))
 
     def click_center(self):
         if not self.control_var.get():
