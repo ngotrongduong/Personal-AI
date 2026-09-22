@@ -32,8 +32,8 @@ if (-not (Test-Path ".venv")) {
 Write-Host "Upgrading pip..."
 & .\.venv\Scripts\python.exe -m pip install --upgrade pip
 
-Write-Host "Installing dependencies..."
-& .\.venv\Scripts\python.exe -m pip install -r requirements.txt
+Write-Host "Installing dependencies (including dev tools: pytest, ruff)..."
+& .\.venv\Scripts\python.exe -m pip install -r requirements-dev.txt
 
 Write-Host ""
 Write-Host "Setup complete." -ForegroundColor Green
