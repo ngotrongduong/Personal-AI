@@ -1,0 +1,7 @@
+dxcam==0.3.0
+numpy>=1.26
+opencv-python>=4.10
+Pillow>=10.0
+pywin32>=306
+PyDirectInput>=1.0.4
+pynput>=1.7.7
