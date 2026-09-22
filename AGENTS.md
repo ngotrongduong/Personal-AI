@@ -34,14 +34,38 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 - All autonomous actions need logging with the rule/action name and reason.
 - Game-specific behavior belongs in profiles/configuration rather than hard-coded core logic.
 - Do not commit `.venv`, screenshots, runtime templates, logs, model weights, secrets, or user data.
+- Prefer files under roughly 300 lines as a soft readability target, not a hard gate. Do not split a module mechanically just to hit a line count; refactor only when a file's responsibilities have actually grown unclear (existing larger files such as `main.py` do not need forced splitting outside a planned refactor).
 
 ## Git workflow
 
 - `main` is the tested baseline.
-- New work goes to `feature/*` branches.
+- `feature/v0.3-game-state` is the current v0.3 integration branch; v0.3 work branches from it, not from `main`.
+- New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
+
+### Multi-AI coordination
+
+This repo is developed by more than one AI assistant at once (Claude Code, Codex/ChatGPT, and GitHub Copilot via `.github/agents` and `.github/prompts`). To avoid collisions and duplicated work:
+
+- Claude Code uses branch names `claude/<task>`.
+- Codex/ChatGPT uses branch names `codex/<task>`.
+- Nobody pushes directly to `main` or to an active integration branch (e.g. `feature/v0.3-game-state`); every change lands through a PR.
+- Before starting a task: `git fetch` and check existing branches/open PRs to confirm the task is not already in progress on another branch.
+- PRs for v0.3 sub-tasks target `feature/v0.3-game-state`, not `main`. That branch merges into `main` only once v0.3 is complete and stable.
+
+```
+main
+  ^
+  | PR (v0.3 complete)
+feature/v0.3-game-state
+  ^
+  |-- claude/<task>   (PR back into feature/v0.3-game-state)
+  |-- codex/<task>    (PR back into feature/v0.3-game-state)
+  `-- codex/<task-2>
+```
+
 - Update `CHANGELOG.md` and relevant docs for user-visible behavior changes.
 - Keep commits scoped and descriptive.
-- Before merge: run syntax checks and the test suite.
+- Before merge: run syntax checks, lint, and the test suite (see `scripts/test.ps1` / CI).
 
 ## v0.3 priority
 
