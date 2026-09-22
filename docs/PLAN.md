@@ -35,7 +35,7 @@ not from Issue #1's original scope — tracked here so they don't get lost:
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Not started — **next up** | Claude | Needs machine access to smoke-test. Scope guard: no autonomous input yet, F8/input behavior unchanged, vision must not send input. See `docs/HANDOFF.md` "Next task". |
+| 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Done, PR open | Claude | Branch `claude/live-detector-loop`. `_selection_release` now also registers the dragged ROI into `DetectorRegistry`; `_run_vision_if_due` runs `detect_all` each tick and feeds results through `apply_detections` into `GameState`, updating a `Detectors:` status line and logging FOUND/LOST transitions. Legacy single-template path untouched. Live-smoke-tested on Windows with two named templates (`line1`, `line3`) against a real Notepad window — both showed simultaneous `FOUND(1.00)`; confirmed F8 emergency stop still works and vision keeps running after it (vision never sends input). 31/31 tests pass, ruff clean. |
 | 12 | Gated action dispatcher (`ActionIntent` → `InputController`, only when input explicitly enabled) | Not started | Unassigned, likely Claude (touches `core`/input safety) | Described in `docs/ARCHITECTURE.md`. Prerequisite for tasks 8 and the acceptance criteria below. |
 
 ## Acceptance criteria (from Issue #1, unchanged)

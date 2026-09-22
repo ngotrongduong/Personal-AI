@@ -12,9 +12,12 @@ from PIL import Image, ImageTk
 from pynput import keyboard
 import win32gui
 
+from agent.game_state import GameState
+from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
 from core.window_utils import list_visible_windows, client_region, focus_window
+from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
@@ -38,6 +41,9 @@ class PersonalGameAIApp:
         self.capture: WindowCapture | None = None
         self.input = InputController()
         self.matcher = TemplateMatcher(threshold=0.82)
+        self.registry = DetectorRegistry()
+        self.game_state = GameState()
+        self._registry_visibility: dict[str, bool] = {}
 
         self.preview_photo = None
         self.preview_image_item = None
@@ -70,6 +76,8 @@ class PersonalGameAIApp:
         self.threshold_var = tk.DoubleVar(value=0.82)
         self.vision_var = tk.StringVar(value="Vision: no template loaded")
         self.template_var = tk.StringVar(value="Template: none")
+        self.detector_name_var = tk.StringVar(value="detector_1")
+        self.detectors_var = tk.StringVar(value="Detectors: none registered")
 
         self._build_ui()
         self.refresh_windows()
@@ -159,11 +167,22 @@ class PersonalGameAIApp:
         threshold.bind("<Return>", lambda _e: self._apply_threshold())
         threshold.bind("<FocusOut>", lambda _e: self._apply_threshold())
 
+        ttk.Label(vision_row, text="Detector name:").pack(side="left", padx=(15, 4))
+        ttk.Entry(
+            vision_row, textvariable=self.detector_name_var, width=16
+        ).pack(side="left")
+        ttk.Button(
+            vision_row, text="Clear Detectors", command=self.clear_detectors
+        ).pack(side="left", padx=5)
+
         ttk.Label(
             vision_box, textvariable=self.template_var
         ).pack(anchor="w", padx=8)
         ttk.Label(
             vision_box, textvariable=self.vision_var
+        ).pack(anchor="w", padx=8)
+        ttk.Label(
+            vision_box, textvariable=self.detectors_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
         info = ttk.Frame(outer)
@@ -397,6 +416,13 @@ class PersonalGameAIApp:
         self.vision_var.set("Vision: no template loaded")
         self.log("Template cleared.")
 
+    def clear_detectors(self):
+        self.registry.clear()
+        self._registry_visibility.clear()
+        self.game_state.clear()
+        self.detectors_var.set("Detectors: none registered")
+        self.log("All named detectors cleared.")
+
     def save_snapshot(self):
         frame = self.latest_raw_frame
         if frame is None:
@@ -482,6 +508,22 @@ class PersonalGameAIApp:
             f"Template created: {path.name}. Vision automatically enabled."
         )
 
+        detector_name = self.detector_name_var.get().strip()
+        if detector_name:
+            try:
+                self.registry.unregister(detector_name)
+                self._registry_visibility.pop(detector_name, None)
+                spec = DetectorSpec(name=detector_name, threshold=self.threshold_var.get())
+                self.registry.register_array(spec, roi)
+                self.log(
+                    f"Detector '{detector_name}' registered "
+                    f"({len(self.registry.names)} total)."
+                )
+            except ValueError as exc:
+                self.log(f"Detector registration error: {exc}")
+        else:
+            self.log("No detector name set; skipping multi-detector registration.")
+
     def _canvas_to_source(self, cx: int, cy: int) -> tuple[int, int]:
         if self.preview_scale <= 0:
             raise RuntimeError("Preview transform is not ready.")
@@ -492,7 +534,7 @@ class PersonalGameAIApp:
         return int(round(x)), int(round(y))
 
     def _run_vision_if_due(self, frame):
-        if not self.vision_enabled_var.get() or not self.matcher.loaded:
+        if not self.vision_enabled_var.get():
             self.latest_match = None
             if self.matcher.loaded:
                 self.vision_var.set("Vision: template loaded, detector disabled")
@@ -504,22 +546,48 @@ class PersonalGameAIApp:
 
         self._last_vision_time = now
 
-        try:
-            match = self.matcher.find_best(frame)
-            self.latest_match = match
+        if self.matcher.loaded:
+            try:
+                match = self.matcher.find_best(frame)
+                self.latest_match = match
 
-            if match is None:
-                self.vision_var.set(
-                    f"Vision: NOT FOUND  | threshold {self.matcher.threshold:.2f}"
-                )
-            else:
-                self.vision_var.set(
-                    f"Vision: FOUND  | score {match.score:.3f}  | "
-                    f"x={match.x}, y={match.y}, w={match.w}, h={match.h}"
-                )
-        except Exception as exc:
-            self.latest_match = None
-            self.vision_var.set(f"Vision error: {exc}")
+                if match is None:
+                    self.vision_var.set(
+                        f"Vision: NOT FOUND  | threshold {self.matcher.threshold:.2f}"
+                    )
+                else:
+                    self.vision_var.set(
+                        f"Vision: FOUND  | score {match.score:.3f}  | "
+                        f"x={match.x}, y={match.y}, w={match.w}, h={match.h}"
+                    )
+            except Exception as exc:
+                self.latest_match = None
+                self.vision_var.set(f"Vision error: {exc}")
+
+        if self.registry.names:
+            try:
+                detections = self.registry.detect_all(frame)
+            except ValueError as exc:
+                self.detectors_var.set(f"Detectors error: {exc}")
+                return
+
+            apply_detections(self.game_state, detections.values())
+
+            parts = []
+            for name in sorted(detections):
+                detection = detections[name]
+                was_visible = self._registry_visibility.get(name)
+                if was_visible != detection.visible:
+                    self._registry_visibility[name] = detection.visible
+                    state_txt = "FOUND" if detection.visible else "LOST"
+                    self.log(
+                        f"Detector '{name}': {state_txt} "
+                        f"(confidence {detection.confidence:.2f})."
+                    )
+                status = "FOUND" if detection.visible else "not found"
+                parts.append(f"{name}={status}({detection.confidence:.2f})")
+
+            self.detectors_var.set("Detectors: " + "  |  ".join(parts))
 
     # ---------------- Preview ----------------
 

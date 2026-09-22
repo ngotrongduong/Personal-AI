@@ -44,20 +44,19 @@ order. Local verification on the merged branch: compile check + ruff + pytest
 | PR/branch | Base | Owner | What it does |
 |-----------|------|-------|---------------|
 | #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
-| `claude/plan-tracking-docs` (this work) | `feature/v0.3-game-state` | Claude | Re-adds this file (dropped from #3's merge), adds `docs/PLAN.md`, task-assignment default, token-economy notes |
+| #8 `codex/v0.3-resource-bars` | `feature/v0.3-game-state` | Codex | v0.3: add HP/resource bar measurement (task 3). Not yet merged. |
+| `claude/live-detector-loop` (this work) | `feature/v0.3-game-state` | Claude | Task 11: wires `DetectorRegistry`/vision→`GameState` into the live Tk capture loop, shows multi-detector status in GUI/log. Live-smoke-tested on Windows (two named templates, both FOUND simultaneously; F8 verified unaffected). 31/31 tests, ruff clean. About to open as a PR. |
 
 Re-verify this table (`git branch -a`, open PRs) before merging or branching from
 any of it — it is a snapshot, not a live view.
 
-### Next task (assigned by Codex, in Issue #1 comments)
+### Next task
 
-**Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop,
-expose multiple live detector states in the GUI/log, smoke-test on Windows with
-at least two named templates.** Needs machine access → Claude's lane.
-
-Scope guard: no autonomous input yet, F8/input behavior unchanged, vision must
-not send input, local compile+ruff+pytest+live smoke test before merge. See
-`docs/PLAN.md` for the full checklist this fits into.
+Task 11 (live-loop wiring, above) is done pending PR review/merge. The next item
+in `docs/PLAN.md` is **task 12: gated action dispatcher** (`ActionIntent` →
+`InputController`, only when input control is explicitly enabled) — likely
+Claude's lane since it touches `core`/input safety, but not yet formally
+assigned in an Issue #1 comment. Confirm assignment there before starting.
 
 ### Known blockers
 
