@@ -1,5 +1,12 @@
 # Personal Game AI — Agent Instructions
 
+## Start here
+
+Before anything else, read [`docs/HANDOFF.md`](docs/HANDOFF.md) — current open PRs,
+who owns what, active blockers. This file (`AGENTS.md`) is the stable rulebook;
+`docs/HANDOFF.md` is the fast-changing "what's going on right now" state. Update
+`docs/HANDOFF.md` when you finish a meaningful chunk of work, before moving on.
+
 ## Mission
 
 Build a local Windows game-playing assistant that observes the screen, maintains game state, and can perform safe mouse/keyboard actions for offline/single-player games or games that explicitly permit automation.
