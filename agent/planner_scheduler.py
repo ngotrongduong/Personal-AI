@@ -7,6 +7,7 @@ import threading
 from typing import Protocol
 
 from .game_state import GameState
+from .llm_planner import PlannerCancelledError
 
 
 logger = logging.getLogger(__name__)
@@ -108,6 +109,8 @@ class PlannerScheduler:
                 try:
                     outcome = self._planner.plan_once(self._state)
                     logger.info("Planner cycle outcome: %s", outcome)
+                except PlannerCancelledError:
+                    logger.info("Planner directive discarded after stop; rule settings unchanged.")
                 except Exception:
                     logger.exception("Planner scheduler cycle failed; retaining current rule settings.")
 

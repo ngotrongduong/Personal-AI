@@ -33,6 +33,7 @@ class OllamaClientTests(unittest.TestCase):
             "prompt": "Choose a directive.",
             "stream": False,
             "format": "json",
+            "think": False,
         })
 
     def test_timeout_returns_structured_error(self) -> None:

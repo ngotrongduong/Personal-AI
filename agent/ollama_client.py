@@ -98,6 +98,7 @@ class OllamaClient:
                 "prompt": prompt,
                 "stream": False,
                 "format": "json",
+                "think": False,
             }
         ).encode("utf-8")
         request = Request(

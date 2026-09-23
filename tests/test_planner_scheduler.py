@@ -5,6 +5,7 @@ import time
 import unittest
 
 from agent.game_state import GameState
+from agent.llm_planner import PlannerCancelledError
 from agent.planner_scheduler import PlannerScheduler
 
 
@@ -13,9 +14,11 @@ class FakePlanner:
         self,
         *,
         fail_first_call: bool = False,
+        raise_cancelled_error: bool = False,
         outcome: object = None,
     ) -> None:
         self._fail_first_call = fail_first_call
+        self._raise_cancelled_error = raise_cancelled_error
         self._outcome = outcome
         self._lock = threading.Lock()
         self.call_times: list[float] = []
@@ -33,6 +36,8 @@ class FakePlanner:
 
         if self._fail_first_call and call_count == 1:
             raise RuntimeError("planned test failure")
+        if self._raise_cancelled_error:
+            raise PlannerCancelledError()
 
         return self._outcome
 
@@ -118,6 +123,25 @@ class PlannerSchedulerTests(unittest.TestCase):
             scheduler.stop()
 
         self.assertTrue(any(outcome in message for message in logs.output))
+
+    def test_cancelled_directive_logs_discard_without_cycle_outcome(self) -> None:
+        planner = FakePlanner(raise_cancelled_error=True)
+        scheduler = self._scheduler(planner)
+
+        with self.assertLogs("agent.planner_scheduler", level="INFO") as logs:
+            self.assertTrue(scheduler.start())
+            self.assertTrue(planner.wait_for_calls(1).wait(timeout=1.0))
+            scheduler.stop()
+
+        self.assertTrue(
+            any(
+                "Planner directive discarded after stop; rule settings unchanged." in message
+                for message in logs.output
+            )
+        )
+        self.assertFalse(any("Planner cycle outcome" in message for message in logs.output))
+        self.assertFalse(any("changed=True" in message for message in logs.output))
+        self.assertFalse(any("Traceback" in message for message in logs.output))
 
     def test_start_and_stop_are_safe_and_support_restart(self) -> None:
         planner = FakePlanner()
