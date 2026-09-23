@@ -62,6 +62,24 @@ The planner proposes; it never directly acts. Concretely:
 | 9 | Real Ollama Windows install + live integration smoke test | Not started | Claude (machine-required) | Install Ollama, pull a small local model, run the actual planner end-to-end against the existing rule engine/dispatcher on a harmless/offline target; confirm F8 and all v0.3 gates still hold with the planner active. |
 | 10 | Minimal planner visibility in UI (optional) | Not started | Claude or Codex, TBD | A small status label/log line in `main.py`'s existing UI showing current planner state (last directive, last call latency/status). Defer if it adds meaningful `main.py` complexity — not required for the acceptance criteria below. |
 
+## Foundational infrastructure (outside the numbered checklist)
+
+`model_runtime/` (types, `ModelProvider` protocol, `ModelCatalog`, `ModelRouter`,
+`OllamaProvider`) plus `configs/models.v1.json` and `docs/MODELS.md` were merged
+2026-09-23 (PR #29) from an external Codex research pass the user ran separately
+(researching local AI models on GitHub for future roles: `visual_reasoner`,
+`memory_embedding`, `heavy_reasoner`, `ocr_specialist`, `speech_to_text`). It is
+purely additive groundwork — does not touch `agent/llm_planner.py`,
+`agent/rule_engine.py`, `agent/planner_scheduler.py`, `agent/ollama_client.py`,
+or `main.py`, and is not wired into the planner/dispatcher safety boundary or
+the fast loop. `ModelRouter` never auto-downloads models; `scripts/models.ps1`
+is an explicit, user-invoked `ollama pull`/`list` wrapper. Safety-reviewed
+(PASS). 107/107 tests pass (13 new: `test_model_catalog.py`,
+`test_model_router.py`, `test_ollama_provider.py`). Not yet used by any
+numbered task above — future tasks that need a second model role (vision/OCR/
+embedding) should route through this instead of hand-rolling another Ollama
+client.
+
 ## Acceptance criteria
 
 - The planner can only select from a predefined, code-reviewed set of
