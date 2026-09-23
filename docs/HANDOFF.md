@@ -26,10 +26,17 @@ clean, on `main`.
 2026-09-23) — headless REST API, no GUI dependency, fits local scripted
 verification. See `docs/PLAN.md` for the full checklist/design constraint
 (the planner proposes directives from a closed vocabulary; it can never
-synthesize raw input or bypass any v0.3 safety gate). No sub-task branches
-opened yet — ready to start handing tasks 1-8 to Codex (pure logic/tests,
-no machine access needed); tasks 9 (real Ollama install + live smoke test)
-and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default routing.
+synthesize raw input or bypass any v0.3 safety gate).
+
+Tasks 1-2 (`codex/v0.4-ollama-client-and-schema`, PR #17) are **done and
+merged** into `feature/v0.4-llm-planner`: `agent/ollama_client.py` (stdlib
+Ollama REST client) and `agent/llm_planner_schema.py` (closed-vocabulary
+directive parser — `enable_rule`/`disable_rule`/`noop`; `set_priority` was
+deferred, not in the initial vocabulary). 15 new tests, 79/79 total pass.
+Task 3 (`agent/llm_planner.py`) is next and depends on both — ready to hand
+to Codex. Tasks 4-8 remain Codex's default lane; tasks 9 (real Ollama
+install + live smoke test) and 10 (optional UI) are Claude's/TBD lane per
+`AGENTS.md`'s default routing.
 
 Claude handles work that genuinely needs the user's Windows machine. Codex/ChatGPT
 defaults to pure logic, algorithms, tests, docs, and config.
@@ -69,10 +76,11 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Delegate v0.4 task 1 (Ollama HTTP client wrapper) and task 2 (planner directive
-schema + validator) to Codex via the `codex-rescue` CLI invocation — both are
-pure logic/tests, no machine access needed, and task 3 (`agent/llm_planner.py`)
-depends on both. PRs target `feature/v0.4-llm-planner`, not `main`.
+Delegate v0.4 task 3 (`agent/llm_planner.py`) to Codex: builds a prompt from a
+`GameState` snapshot + known rules, calls `OllamaClient.generate`, validates
+the response with `parse_directive`, and applies accepted directives via
+`RuleEngine`'s existing enable/disable surface only. Depends on tasks 1-2
+(done, PR #17). PRs target `feature/v0.4-llm-planner`, not `main`.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
