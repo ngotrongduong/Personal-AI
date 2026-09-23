@@ -49,8 +49,8 @@ The planner proposes; it never directly acts. Concretely:
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 1 | Ollama HTTP client wrapper | Not started | Codex (default) | Minimal client for Ollama's REST API (`/api/generate` or `/api/chat`): configurable host/port/model, timeout, structured JSON parsing. No other project code should talk to Ollama directly. |
-| 2 | Planner directive schema + validator | Not started | Codex (default) | Define the fixed, closed vocabulary of allowed directives (enable/disable a named rule, set a priority/target) as a schema; reject and log anything that doesn't validate — never pass raw LLM text through to execution. |
+| 1 | Ollama HTTP client wrapper | Done, not merged | Codex | `agent/ollama_client.py`: stdlib-only, non-streaming `/api/generate`, injectable `Transport` for tests, `OllamaResult`/`OllamaError` with kind (CONNECTION/TIMEOUT/HTTP_STATUS/RESPONSE_FORMAT). 6 tests in `tests/test_ollama_client.py`. |
+| 2 | Planner directive schema + validator | Done, not merged | Codex | `agent/llm_planner_schema.py`: closed vocabulary is `enable_rule`/`disable_rule`/`noop` (no `set_priority` — deferred, not needed yet); exact-field validation, rejects unknown type/rule/extra fields. 9 tests in `tests/test_llm_planner_schema.py`. |
 | 3 | `agent/llm_planner.py` | Not started | Codex (default) | Builds a prompt from a `GameState` snapshot + the current set of known rules/detectors, calls the Ollama client, validates the response against the schema, and applies accepted directives via `RuleEngine`'s existing enable/disable/config surface only. |
 | 4 | Planner cadence/timer, isolated from the fast loop | Not started | Codex (default) | Runs on its own interval on a background thread/timer; explicit non-blocking behavior toward the Tk UI thread and the per-frame vision/rule loop. |
 | 5 | Fallback/timeout handling | Not started | Codex (default) | Ollama unreachable/slow/invalid-output paths all fall back to "keep last-known rule configuration, log why, keep running" — no exceptions escape into the fast loop. |
