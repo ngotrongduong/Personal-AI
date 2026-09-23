@@ -1,0 +1,13 @@
+[tool.ruff]
+line-length = 100
+exclude = [".venv", "snapshots", "templates"]
+
+[tool.ruff.lint]
+# Intentionally minimal baseline (syntax errors + undefined names) so introducing
+# the linter doesn't force a repo-wide reformat/rewrite of files other agents may
+# be actively editing on parallel branches. Broaden this select list gradually as
+# existing modules get touched for other reasons, not as a standalone cleanup pass.
+select = ["E9", "F63", "F7", "F82"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

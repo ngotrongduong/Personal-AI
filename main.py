@@ -12,9 +12,14 @@ from PIL import Image, ImageTk
 from pynput import keyboard
 import win32gui
 
+from agent.action_dispatcher import ActionDispatcher
+from agent.game_state import GameState
+from agent.rule_engine import RuleEngine, VisibilityRule
+from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
 from core.window_utils import list_visible_windows, client_region, focus_window
+from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
@@ -38,6 +43,11 @@ class PersonalGameAIApp:
         self.capture: WindowCapture | None = None
         self.input = InputController()
         self.matcher = TemplateMatcher(threshold=0.82)
+        self.registry = DetectorRegistry()
+        self.game_state = GameState()
+        self._registry_visibility: dict[str, bool] = {}
+        self.rule_engine = RuleEngine()
+        self.dispatcher = ActionDispatcher(self.input)
 
         self.preview_photo = None
         self.preview_image_item = None
@@ -70,6 +80,13 @@ class PersonalGameAIApp:
         self.threshold_var = tk.DoubleVar(value=0.82)
         self.vision_var = tk.StringVar(value="Vision: no template loaded")
         self.template_var = tk.StringVar(value="Template: none")
+        self.detector_name_var = tk.StringVar(value="detector_1")
+        self.detectors_var = tk.StringVar(value="Detectors: none registered")
+
+        self.rule_name_var = tk.StringVar(value="rule_1")
+        self.rule_detector_var = tk.StringVar(value="")
+        self.rule_min_confidence_var = tk.DoubleVar(value=0.82)
+        self.rules_var = tk.StringVar(value="Rules: 0 active. Input control still gates every dispatch.")
 
         self._build_ui()
         self.refresh_windows()
@@ -159,11 +176,61 @@ class PersonalGameAIApp:
         threshold.bind("<Return>", lambda _e: self._apply_threshold())
         threshold.bind("<FocusOut>", lambda _e: self._apply_threshold())
 
+        ttk.Label(vision_row, text="Detector name:").pack(side="left", padx=(15, 4))
+        ttk.Entry(
+            vision_row, textvariable=self.detector_name_var, width=16
+        ).pack(side="left")
+        ttk.Button(
+            vision_row, text="Clear Detectors", command=self.clear_detectors
+        ).pack(side="left", padx=5)
+
         ttk.Label(
             vision_box, textvariable=self.template_var
         ).pack(anchor="w", padx=8)
         ttk.Label(
             vision_box, textvariable=self.vision_var
+        ).pack(anchor="w", padx=8)
+        ttk.Label(
+            vision_box, textvariable=self.detectors_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+
+        rules_box = ttk.LabelFrame(
+            outer, text="Rules — gated autonomous actions (only run when input control is enabled)"
+        )
+        rules_box.pack(fill="x", pady=(0, 8))
+
+        rules_row = ttk.Frame(rules_box)
+        rules_row.pack(fill="x", padx=8, pady=(7, 4))
+
+        ttk.Label(rules_row, text="Rule name:").pack(side="left")
+        ttk.Entry(rules_row, textvariable=self.rule_name_var, width=14).pack(
+            side="left", padx=(4, 12)
+        )
+
+        ttk.Label(rules_row, text="Detector:").pack(side="left")
+        ttk.Entry(rules_row, textvariable=self.rule_detector_var, width=14).pack(
+            side="left", padx=(4, 12)
+        )
+
+        ttk.Label(rules_row, text="Min confidence:").pack(side="left")
+        ttk.Spinbox(
+            rules_row,
+            from_=0.50,
+            to=0.99,
+            increment=0.01,
+            textvariable=self.rule_min_confidence_var,
+            width=6,
+        ).pack(side="left", padx=(4, 12))
+
+        ttk.Label(rules_row, text="Action: click").pack(side="left", padx=(0, 12))
+
+        ttk.Button(rules_row, text="Add Rule", command=self.add_rule).pack(side="left")
+        ttk.Button(
+            rules_row, text="Clear Rules", command=self.clear_rules
+        ).pack(side="left", padx=5)
+
+        ttk.Label(
+            rules_box, textvariable=self.rules_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
         info = ttk.Frame(outer)
@@ -315,7 +382,11 @@ class PersonalGameAIApp:
             self.input.tap_key("w", 0.25)
             self.root.after(0, lambda: self.log("Test W completed."))
         except Exception as exc:
-            self.root.after(0, lambda: self.log(f"Input error: {exc}"))
+            # `exc` is unbound by Python as soon as this except block exits, but
+            # root.after runs the lambda later on the Tk main thread — capture the
+            # message now so the deferred callback doesn't hit a NameError.
+            message = str(exc)
+            self.root.after(0, lambda: self.log(f"Input error: {message}"))
 
     def click_center(self):
         if not self.control_var.get():
@@ -392,6 +463,40 @@ class PersonalGameAIApp:
         self.template_var.set("Template: none")
         self.vision_var.set("Vision: no template loaded")
         self.log("Template cleared.")
+
+    def clear_detectors(self):
+        self.registry.clear()
+        self._registry_visibility.clear()
+        self.game_state.clear()
+        self.detectors_var.set("Detectors: none registered")
+        self.log("All named detectors cleared.")
+
+    def add_rule(self):
+        name = self.rule_name_var.get().strip()
+        detector_name = self.rule_detector_var.get().strip()
+        try:
+            min_confidence = float(self.rule_min_confidence_var.get())
+            rule = VisibilityRule(
+                name=name,
+                detector_name=detector_name,
+                action="click",
+                min_confidence=min_confidence,
+            )
+            self.rule_engine.add_rule(rule)
+        except ValueError as exc:
+            messagebox.showerror("Add Rule", str(exc))
+            return
+
+        self.rules_var.set(f"Rules: {len(self.rule_engine.rules)} active.")
+        self.log(
+            f"Rule added: '{name}' -> click on '{detector_name}' "
+            f"(min confidence {min_confidence:.2f}). Still gated by input control."
+        )
+
+    def clear_rules(self):
+        self.rule_engine = RuleEngine()
+        self.rules_var.set("Rules: 0 active.")
+        self.log("All rules cleared.")
 
     def save_snapshot(self):
         frame = self.latest_raw_frame
@@ -478,6 +583,22 @@ class PersonalGameAIApp:
             f"Template created: {path.name}. Vision automatically enabled."
         )
 
+        detector_name = self.detector_name_var.get().strip()
+        if detector_name:
+            try:
+                self.registry.unregister(detector_name)
+                self._registry_visibility.pop(detector_name, None)
+                spec = DetectorSpec(name=detector_name, threshold=self.threshold_var.get())
+                self.registry.register_array(spec, roi)
+                self.log(
+                    f"Detector '{detector_name}' registered "
+                    f"({len(self.registry.names)} total)."
+                )
+            except ValueError as exc:
+                self.log(f"Detector registration error: {exc}")
+        else:
+            self.log("No detector name set; skipping multi-detector registration.")
+
     def _canvas_to_source(self, cx: int, cy: int) -> tuple[int, int]:
         if self.preview_scale <= 0:
             raise RuntimeError("Preview transform is not ready.")
@@ -488,7 +609,7 @@ class PersonalGameAIApp:
         return int(round(x)), int(round(y))
 
     def _run_vision_if_due(self, frame):
-        if not self.vision_enabled_var.get() or not self.matcher.loaded:
+        if not self.vision_enabled_var.get():
             self.latest_match = None
             if self.matcher.loaded:
                 self.vision_var.set("Vision: template loaded, detector disabled")
@@ -500,22 +621,74 @@ class PersonalGameAIApp:
 
         self._last_vision_time = now
 
-        try:
-            match = self.matcher.find_best(frame)
-            self.latest_match = match
+        if self.matcher.loaded:
+            try:
+                match = self.matcher.find_best(frame)
+                self.latest_match = match
 
-            if match is None:
-                self.vision_var.set(
-                    f"Vision: NOT FOUND  | threshold {self.matcher.threshold:.2f}"
+                if match is None:
+                    self.vision_var.set(
+                        f"Vision: NOT FOUND  | threshold {self.matcher.threshold:.2f}"
+                    )
+                else:
+                    self.vision_var.set(
+                        f"Vision: FOUND  | score {match.score:.3f}  | "
+                        f"x={match.x}, y={match.y}, w={match.w}, h={match.h}"
+                    )
+            except Exception as exc:
+                self.latest_match = None
+                self.vision_var.set(f"Vision error: {exc}")
+
+        if self.registry.names:
+            try:
+                detections = self.registry.detect_all(frame)
+            except ValueError as exc:
+                self.detectors_var.set(f"Detectors error: {exc}")
+                return
+
+            apply_detections(self.game_state, detections.values())
+
+            parts = []
+            for name in sorted(detections):
+                detection = detections[name]
+                was_visible = self._registry_visibility.get(name)
+                if was_visible != detection.visible:
+                    self._registry_visibility[name] = detection.visible
+                    state_txt = "FOUND" if detection.visible else "LOST"
+                    self.log(
+                        f"Detector '{name}': {state_txt} "
+                        f"(confidence {detection.confidence:.2f})."
+                    )
+                status = "FOUND" if detection.visible else "not found"
+                parts.append(f"{name}={status}({detection.confidence:.2f})")
+
+            self.detectors_var.set("Detectors: " + "  |  ".join(parts))
+
+        if self.rule_engine.rules:
+            intents = self.rule_engine.evaluate(self.game_state)
+            if intents:
+                # Use the window this frame actually came from, not whatever
+                # the window-picker combobox currently shows -- the two can
+                # diverge if the user reselects the combobox while capture
+                # keeps running against the original window, and a bbox from
+                # one window's frame is meaningless on another window's
+                # screen coordinates.
+                hwnd = self.capture.hwnd if self.capture else None
+
+                last_outcome = "blocked"
+                for intent in intents:
+                    result = self.dispatcher.dispatch(intent, hwnd=hwnd)
+                    last_outcome = "dispatched" if result.dispatched else "blocked"
+                    self.log(
+                        f"Rule '{intent.rule_name}' target={intent.detector_name} "
+                        f"confidence={intent.confidence:.2f} -> "
+                        f"{last_outcome.upper()}: {result.reason}"
+                    )
+
+                self.rules_var.set(
+                    f"Rules: {len(self.rule_engine.rules)} active. "
+                    f"Last: '{intents[-1].rule_name}' {last_outcome}."
                 )
-            else:
-                self.vision_var.set(
-                    f"Vision: FOUND  | score {match.score:.3f}  | "
-                    f"x={match.x}, y={match.y}, w={match.w}, h={match.h}"
-                )
-        except Exception as exc:
-            self.latest_match = None
-            self.vision_var.set(f"Vision error: {exc}")
 
     # ---------------- Preview ----------------
 
