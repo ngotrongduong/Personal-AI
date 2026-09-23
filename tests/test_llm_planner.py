@@ -156,6 +156,22 @@ class LlmPlannerTests(unittest.TestCase):
         self.assertIn("click_collect: enabled", prompt)
         self.assertIn("heal_low_hp: disabled", prompt)
 
+    def test_prompt_includes_the_only_supported_directive_shapes(self) -> None:
+        planner, client = self._planner(OllamaResult(text='{"type":"noop"}'))
+
+        planner.plan_once(self.state)
+
+        prompt = client.prompts[0]
+        self.assertIn(
+            '{"type": "enable_rule", "rule_name": "<one of the current rule names>"}',
+            prompt,
+        )
+        self.assertIn(
+            '{"type": "disable_rule", "rule_name": "<one of the current rule names>"}',
+            prompt,
+        )
+        self.assertIn('{"type": "noop"}', prompt)
+
 
 if __name__ == "__main__":
     unittest.main()

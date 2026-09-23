@@ -98,11 +98,46 @@ transport → `LlmPlanner` → `RuleEngine`, driven by `PlannerScheduler`'s
 background thread). Tests only, no production change, no bugs found.
 Safety-reviewed PASS. PR #35. 128/128 tests pass.
 
-Next up: task 9 (real Ollama Windows install + live smoke test —
-Claude/machine-required lane) or task 10 (optional minimal planner UI,
-TBD). Note that `PlannerScheduler`/`PlannerConfig` are still not wired
-into `main.py`; task 9's live test will need that wiring (or a small
-harness) to exercise the planner end-to-end.
+**v0.4 task 9 done (2026-09-23): real Ollama + live smoke test.** Ollama
+0.34.3 is installed on the Windows dev machine (`%LOCALAPPDATA%\Programs\Ollama`,
+server on 127.0.0.1:11434) with model `qwen3.5:9b` (~6.6 GB) pulled.
+
+Wiring (Codex): `agent/planner_controller.py`'s `PlannerController` owns the
+optional scheduler lifecycle (`OllamaClient` → `LlmPlanner` →
+`PlannerScheduler`, no input/dispatch role). `main.py` gained a default-off
+"Planner (Ollama)" panel (enable checkbox, model default `qwen3.5:9b`, interval
+≥ 1.0s, status label); planner INFO logs are forwarded to the Tk log. F8,
+Clear Rules, and window close stop the planner, and F8/close release input
+*before* stopping it. `stop()` is non-blocking (`join_timeout=0.0`), and a
+per-start `_CancellableRuleControl` proxy makes any in-flight directive after
+stop raise `PlannerCancelledError` (logged once as "discarded after stop; rule
+settings unchanged", no misleading `changed=True` outcome).
+
+Live findings fixed: `qwen3.5` is a thinking model — with `format:"json"` and
+no `think` flag Ollama returned an empty `response` or HTTP 500, so
+`OllamaClient` now sends `"think": false`. The model also invented keys
+(`{"action": "noop"}`) until the prompt listed the three exact JSON shapes.
+`parse_directive` remains the only authority.
+
+Live results: headless planner 4/4 correct noops (~2.3s/call); scheduler with
+the real model correctly enabled a disabled rule whose detector was visible;
+`stop()` returned in <1ms and in-flight directives were discarded; unreachable
+Ollama kept rules unchanged. GUI smoke on a harmless Notepad window: template
+detector FOUND, rule dispatches stayed BLOCKED with input disabled, enabling
+the planner did not enable input, planner cycles logged `noop`, F8 unticked
+input *and* stopped the planner ("disabled by emergency stop"), and no cycles
+ran afterwards. Real click dispatch was not exercised in this run (v0.3 gates
+unchanged). Safety-reviewed twice (PASS; all Important/Minor findings fixed).
+137/137 tests.
+
+Follow-ups (not blocking): planner rule changes are logged without a reason
+(could add an optional `reason` field to the directive schema); a quick
+disable/re-enable can leave a cancelled worker waiting on HTTP (up to the 30s
+timeout) alongside the new one — harmless, just wasted Ollama work; there are no
+Tk-level tests for the planner panel.
+
+Next up: task 10 (optional planner visibility — last directive/latency in the
+UI; the minimal enable/status panel already exists from task 9).
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
@@ -172,8 +207,8 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.4 task 9 (real Ollama install + live smoke test on Windows, Claude's lane)
-or task 10 (optional UI). Tasks 1-8 are done. PRs target
+v0.4 task 10 (optional planner visibility in the UI). Tasks 1-9 are done;
+Ollama + `qwen3.5:9b` are installed locally. PRs target
 `feature/v0.4-llm-planner`, not `main`.
 
 Re-check GitHub before starting new work because this file is a snapshot.

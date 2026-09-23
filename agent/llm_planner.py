@@ -24,6 +24,10 @@ class PlannerOutcome:
     changed: bool = False
 
 
+class PlannerCancelledError(RuntimeError):
+    """Raised when shutdown discards an in-flight planner directive."""
+
+
 class LlmPlanner:
     """Ask Ollama for one reviewed directive without directly producing input."""
 
@@ -80,7 +84,11 @@ class LlmPlanner:
                 *observation_lines,
                 "Current rules:",
                 *rule_lines,
-                "Respond with one JSON directive: enable_rule, disable_rule, or noop.",
+                "Respond with exactly one JSON object and nothing else, using one of these shapes:",
+                '{"type": "enable_rule", "rule_name": "<one of the current rule names>"}',
+                '{"type": "disable_rule", "rule_name": "<one of the current rule names>"}',
+                '{"type": "noop"}',
+                "Use only these keys. Do not add other keys.",
             ]
         )
 
