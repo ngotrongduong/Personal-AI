@@ -28,15 +28,30 @@ verification. See `docs/PLAN.md` for the full checklist/design constraint
 (the planner proposes directives from a closed vocabulary; it can never
 synthesize raw input or bypass any v0.3 safety gate).
 
-Tasks 1-2 (`codex/v0.4-ollama-client-and-schema`, PR #17) are **done and
-merged** into `feature/v0.4-llm-planner`: `agent/ollama_client.py` (stdlib
-Ollama REST client) and `agent/llm_planner_schema.py` (closed-vocabulary
-directive parser — `enable_rule`/`disable_rule`/`noop`; `set_priority` was
-deferred, not in the initial vocabulary). 15 new tests, 79/79 total pass.
-Task 3 (`agent/llm_planner.py`) is next and depends on both — ready to hand
-to Codex. Tasks 4-8 remain Codex's default lane; tasks 9 (real Ollama
-install + live smoke test) and 10 (optional UI) are Claude's/TBD lane per
-`AGENTS.md`'s default routing.
+Tasks 1-3 are **done and merged** into `feature/v0.4-llm-planner`:
+`agent/ollama_client.py` (stdlib Ollama REST client, PR #17),
+`agent/llm_planner_schema.py` (closed-vocabulary directive parser —
+`enable_rule`/`disable_rule`/`noop`; `set_priority` was deferred, PR #17),
+and `agent/llm_planner.py` (`LlmPlanner.plan_once`: prompt from `GameState`
+→ Ollama → `parse_directive` → `RuleEngine.enable_rule`/`disable_rule` only,
+fails closed on any error, PR #20). Along the way, task 3 surfaced that
+`RuleEngine` had no enable/disable-rule API at all — that gap was fixed
+first (`RuleEngine.enable_rule`/`disable_rule`/`is_rule_enabled`, PR #19)
+before task 3 could be built. Both PR #19 and PR #20 got an explicit
+`safety-reviewer` PASS before merging, since they touch the core
+LLM-to-rule-engine safety boundary. 89/89 tests pass on
+`feature/v0.4-llm-planner`.
+
+Next up: task 4 (planner cadence/timer isolated from the fast loop/Tk UI
+thread) — depends on task 3, ready to hand to Codex. Tasks 5-8 remain
+Codex's default lane; tasks 9 (real Ollama install + live smoke test) and
+10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default routing.
+
+**Operational note:** Codex's CLI sandbox intermittently denies git writes
+(can't reliably run `git checkout -b`/`git commit` itself, even though it
+can edit/create files fine). Workaround: tell it explicitly to run no git
+commands at all and just edit files in the working tree; Claude branches/
+commits/pushes afterward. Apply this to future Codex delegations here.
 
 Claude handles work that genuinely needs the user's Windows machine. Codex/ChatGPT
 defaults to pure logic, algorithms, tests, docs, and config.
@@ -76,11 +91,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Delegate v0.4 task 3 (`agent/llm_planner.py`) to Codex: builds a prompt from a
-`GameState` snapshot + known rules, calls `OllamaClient.generate`, validates
-the response with `parse_directive`, and applies accepted directives via
-`RuleEngine`'s existing enable/disable surface only. Depends on tasks 1-2
-(done, PR #17). PRs target `feature/v0.4-llm-planner`, not `main`.
+Delegate v0.4 task 4 (planner cadence/timer) to Codex: runs `LlmPlanner.plan_once`
+on its own slow interval (seconds, not frames) on a background thread, explicitly
+non-blocking toward the Tk UI thread and the per-frame vision/rule loop. Depends
+on task 3 (done, PR #20). PRs target `feature/v0.4-llm-planner`, not `main`.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
