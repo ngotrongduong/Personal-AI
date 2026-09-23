@@ -77,6 +77,52 @@ class OllamaClientTests(unittest.TestCase):
         assert result.error is not None
         self.assertEqual(result.error.kind, OllamaErrorKind.RESPONSE_FORMAT)
 
+    def test_response_without_a_string_response_field_returns_format_error(self) -> None:
+        for body in (b"{}", b'{"response": 42}', b'{"response": null}', b"[]"):
+            with self.subTest(body=body):
+                result = OllamaClient(
+                    OllamaClientConfig(model="test"),
+                    transport=lambda _request, _timeout, body=body: body,
+                ).generate("prompt")
+
+                self.assertIsNotNone(result.error)
+                assert result.error is not None
+                self.assertEqual(result.error.kind, OllamaErrorKind.RESPONSE_FORMAT)
+
+    def test_non_utf8_response_returns_format_error(self) -> None:
+        result = OllamaClient(
+            OllamaClientConfig(model="test"),
+            transport=lambda _request, _timeout: b"\xff\xfe\x00",
+        ).generate("prompt")
+
+        self.assertIsNotNone(result.error)
+        assert result.error is not None
+        self.assertEqual(result.error.kind, OllamaErrorKind.RESPONSE_FORMAT)
+
+    def test_url_timeout_returns_timeout_error(self) -> None:
+        for reason in (TimeoutError("timed out"), "timed out"):
+            with self.subTest(reason=reason):
+                def transport(_request: object, _timeout: float, reason: object = reason) -> bytes:
+                    raise URLError(reason)
+
+                result = OllamaClient(OllamaClientConfig(model="test"), transport=transport).generate(
+                    "prompt"
+                )
+
+                self.assertIsNotNone(result.error)
+                assert result.error is not None
+                self.assertEqual(result.error.kind, OllamaErrorKind.TIMEOUT)
+
+    def test_direct_connection_refusal_returns_connection_error(self) -> None:
+        def transport(_request: object, _timeout: float) -> bytes:
+            raise ConnectionRefusedError("Ollama is not running")
+
+        result = OllamaClient(OllamaClientConfig(model="test"), transport=transport).generate("prompt")
+
+        self.assertIsNotNone(result.error)
+        assert result.error is not None
+        self.assertEqual(result.error.kind, OllamaErrorKind.CONNECTION)
+
     def test_config_rejects_invalid_values(self) -> None:
         with self.assertRaises(ValueError):
             OllamaClientConfig(model="")

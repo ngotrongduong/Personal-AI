@@ -56,6 +56,50 @@ class PlannerDirectiveSchemaTests(unittest.TestCase):
         with self.assertRaisesRegex(DirectiveValidationError, "must be an object"):
             parse_directive("[]", self.known_rules)
 
+    def test_rejects_missing_or_non_string_type(self) -> None:
+        for raw in ("{}", '{"rule_name":"heal_low_hp"}', '{"type":5}', '{"type":null}'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(DirectiveValidationError):
+                    parse_directive(raw, self.known_rules)
+
+    def test_rejects_empty_rule_name(self) -> None:
+        with self.assertRaises(DirectiveValidationError):
+            parse_directive('{"type":"enable_rule","rule_name":""}', self.known_rules)
+
+    def test_rejects_missing_rule_name_for_rule_directives(self) -> None:
+        for raw in ('{"type":"enable_rule"}', '{"type":"disable_rule"}'):
+            with self.subTest(raw=raw):
+                with self.assertRaises(DirectiveValidationError):
+                    parse_directive(raw, self.known_rules)
+
+    def test_rejects_json_wrapped_in_prose_or_markdown(self) -> None:
+        for raw in (
+            'Sure! {"type":"noop"}',
+            '```json\n{"type":"noop"}\n```',
+        ):
+            with self.subTest(raw=raw):
+                with self.assertRaises(DirectiveValidationError):
+                    parse_directive(raw, self.known_rules)
+
+    def test_rejects_action_smuggling_attempts(self) -> None:
+        for raw in (
+            '{"type":"click","x":10,"y":20}',
+            '{"type":"press_key","key":"f8"}',
+            '{"type":"enable_rule","rule_name":"heal_low_hp","action":"click"}',
+        ):
+            with self.subTest(raw=raw):
+                with self.assertRaises(DirectiveValidationError):
+                    parse_directive(raw, self.known_rules)
+
+    def test_rejects_different_case_for_directive_or_rule_name(self) -> None:
+        for raw in (
+            '{"type":"Enable_Rule","rule_name":"heal_low_hp"}',
+            '{"type":"enable_rule","rule_name":"HEAL_LOW_HP"}',
+        ):
+            with self.subTest(raw=raw):
+                with self.assertRaises(DirectiveValidationError):
+                    parse_directive(raw, self.known_rules)
+
 
 if __name__ == "__main__":
     unittest.main()
