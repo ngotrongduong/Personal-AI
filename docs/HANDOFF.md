@@ -34,7 +34,6 @@ pytest **28/28 pass**. PR #7 is docs/coordination only.
 | PR/branch | Base | Owner | What it does |
 |-----------|------|-------|---------------|
 | #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
-| `codex/v0.3-ocr` | `feature/v0.3-game-state` | Codex | Task 4: OCR implementation ready for draft PR: `OcrEngine`/optional `PytesseractEngine`, clipped ROI reads, whitelist and confidence filtering (including retaining non-empty text when Tesseract reports `-1` confidence after whitelist filtering), GameState bridge, fake-engine tests. Real Tesseract remains a Windows smoke-test follow-up. |
 
 ### Merged since last update
 
@@ -56,12 +55,21 @@ dispatched into a throwaway Notepad window once input control enabled, correctly
 blocked before that and after F8. Squash-merged into `feature/v0.3-game-state`;
 55/55 tests pass, ruff clean on the merged branch.
 
+PR #11 (`codex/v0.3-ocr`, task 4: basic OCR for simple text/numbers) — `vision/ocr.py`
+(`OcrEngine` protocol, `PytesseractEngine`), `agent/ocr_state_bridge.py`, ROI/whitelist/
+confidence-threshold filtering. Live-smoke-tested on Windows against real Tesseract
+(UB-Mannheim 5.4.0 via winget): found and fixed (Codex) a confidence-clamping bug where
+whitelist-filtered text with Tesseract-reported `-1` confidence was silently dropped
+instead of retained at zero confidence — two regression tests added. Realistic tight-ROI
+digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-state`;
+64/64 tests pass, ruff clean on the merged branch.
+
 ### Next task
 
-Tasks 3, 11, and 12 are done. Task 4 (OCR) is implemented on
-`codex/v0.3-ocr` and is ready for a draft PR. Claude will install real Tesseract
-and live-smoke-test it after the PR lands. After that, re-check `docs/PLAN.md`'s
-acceptance criteria for what's left in v0.3.
+All of tasks 1-12 in `docs/PLAN.md` are now Done. All five acceptance criteria
+listed there are satisfied. Next: re-check `docs/PLAN.md`'s acceptance criteria
+against Issue #1 to confirm v0.3 is ready to come out of draft (PR #2 into `main`),
+or decide what's left before that.
 
 Re-check GitHub before merging because this table is a snapshot.
 
