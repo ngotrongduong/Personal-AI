@@ -55,6 +55,7 @@ class RuleEngine:
 
     def __init__(self, rules: list[VisibilityRule] | None = None) -> None:
         self._rules: list[VisibilityRule] = list(rules or [])
+        self._disabled_rule_names: set[str] = set()
         self._last_emitted_at: dict[str, float] = {}
 
     @property
@@ -66,6 +67,18 @@ class RuleEngine:
             raise ValueError(f"Duplicate rule name: {rule.name}")
         self._rules.append(rule)
 
+    def enable_rule(self, name: str) -> None:
+        self._require_known_rule(name)
+        self._disabled_rule_names.discard(name)
+
+    def disable_rule(self, name: str) -> None:
+        self._require_known_rule(name)
+        self._disabled_rule_names.add(name)
+
+    def is_rule_enabled(self, name: str) -> bool:
+        self._require_known_rule(name)
+        return name not in self._disabled_rule_names
+
     def reset_cooldowns(self) -> None:
         self._last_emitted_at.clear()
 
@@ -74,6 +87,8 @@ class RuleEngine:
         intents: list[ActionIntent] = []
 
         for rule in self._rules:
+            if rule.name in self._disabled_rule_names:
+                continue
             observation = state.get(rule.detector_name)
             if observation is None:
                 continue
@@ -108,3 +123,7 @@ class RuleEngine:
             self._last_emitted_at[rule.name] = current
 
         return intents
+
+    def _require_known_rule(self, name: str) -> None:
+        if not any(rule.name == name for rule in self._rules):
+            raise ValueError(f"Unknown rule name: {name}")
