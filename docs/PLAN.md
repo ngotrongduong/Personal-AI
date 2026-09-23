@@ -24,9 +24,9 @@ game state and performing safe rule-based actions.
 | 5 | Persistent game-state variables | Done | Codex (PR #2) | `agent/game_state.py` (`GameState`, `Observation`). |
 | 6 | Safe rule engine (`IF X.visible THEN click`) | Done | Codex (PR #2) | `agent/rule_engine.py` (`RuleEngine`, `VisibilityRule`). Produces `ActionIntent`s only — nothing dispatches them yet. |
 | 7 | Action cooldowns/debouncing | Done | Codex (PR #2) | Built into `RuleEngine` (monotonic-time cooldown per rule). |
-| 8 | Action log (rule, target, confidence, result) | Not started | Unassigned | Needs the dispatcher (task 12) to exist first — nothing produces a "result" yet. |
-| 9 | F8 global emergency stop active for every autonomous action | Behavior preserved, not yet exercised by an autonomous action | Claude | Verified via live smoke test that F8/input-enable still work correctly (Issue #4 fix). Revisit once a dispatcher exists. |
-| 10 | Test the full loop on a harmless/offline target before any real game profile | Blocked on task 11 | Claude | This is the live smoke test — needs the live-loop wiring below first. |
+| 8 | Action log (rule, target, confidence, result) | Done | Claude (task 12) | Satisfied as a side effect of task 12: `main.py`'s `_run_vision_if_due` logs `Rule '<name>' target=<detector> confidence=<c> -> DISPATCHED/BLOCKED: <reason>` for every dispatch attempt. |
+| 9 | F8 global emergency stop active for every autonomous action | Done | Claude | Verified live with a real autonomous action now dispatched (task 12): F8 immediately flips `input.enabled` off, further rule firings log `BLOCKED: Input control is disabled.`, and vision/detection keeps running unaffected. |
+| 10 | Test the full loop on a harmless/offline target before any real game profile | Done | Claude | Live-smoke-tested task 12's dispatcher end-to-end against a throwaway Notepad window (see task 12 notes below). |
 
 ## Not part of this checklist (tracked separately)
 
@@ -36,19 +36,19 @@ not from Issue #1's original scope — tracked here so they don't get lost:
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
 | 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Done, PR open | Claude | Branch `claude/live-detector-loop`. `_selection_release` now also registers the dragged ROI into `DetectorRegistry`; `_run_vision_if_due` runs `detect_all` each tick and feeds results through `apply_detections` into `GameState`, updating a `Detectors:` status line and logging FOUND/LOST transitions. Legacy single-template path untouched. Live-smoke-tested on Windows with two named templates (`line1`, `line3`) against a real Notepad window — both showed simultaneous `FOUND(1.00)`; confirmed F8 emergency stop still works and vision keeps running after it (vision never sends input). 31/31 tests pass, ruff clean. |
-| 12 | Gated action dispatcher (`ActionIntent` → `InputController`, only when input explicitly enabled) | Not started | Unassigned, likely Claude (touches `core`/input safety) | Described in `docs/ARCHITECTURE.md`. Prerequisite for tasks 8 and the acceptance criteria below. |
+| 12 | Gated action dispatcher (`ActionIntent` → `InputController`, only when input explicitly enabled) | Done, PR open | Claude | Branch `claude/action-dispatcher`, stacked on the still-open `claude/live-detector-loop` (PR #9). New `agent/action_dispatcher.py` (`ActionDispatcher`, `DispatchResult`) enforces all 4 gates from `docs/ARCHITECTURE.md` in order: input control explicitly enabled (also covers "F8 hasn't fired," since `emergency_stop()` sets `input.enabled = False`), action supported (`click` only), intent not stale (`max_intent_age_seconds`, default 0.5s), target window/bbox resolvable. Wired into `main.py`'s `_run_vision_if_due` via a new "Rules" UI section (add/clear rules, min confidence). Dispatch hwnd is sourced from `self.capture.hwnd` (the window actually being captured), not the window-picker combobox selection — a safety-reviewer subagent caught that the two can diverge and this was fixed before commit, with a dedicated regression test (`tests/test_main_action_dispatch.py`). Live-smoke-tested on Windows against a throwaway Notepad window: dispatch correctly blocked before input control was enabled, correctly dispatched a real click at the right coordinates once enabled (visually confirmed), and F8 immediately blocked further dispatch again while vision kept running. 42/42 tests pass, ruff clean. |
 
 ## Acceptance criteria (from Issue #1, unchanged)
 
 - Multiple detectors can run without overwriting each other. — satisfied at the
   pure-logic level (task 1/2 tests); not yet exercised live (task 11).
-- Game state updates from live screen capture. — pending task 11.
+- Game state updates from live screen capture. — satisfied (task 11).
 - A rule can trigger a keyboard/mouse action only when input control is
-  explicitly enabled. — pending task 12 (dispatcher doesn't exist yet).
+  explicitly enabled. — satisfied and live-smoke-tested (task 12).
 - Repeated detections cannot spam actions due to cooldown/debounce logic. —
   satisfied at the pure-logic level (task 7); not yet exercised live.
-- F8 immediately disables autonomous input and releases held inputs. — existing
-  behavior preserved and verified; nothing autonomous exists yet to disable.
+- F8 immediately disables autonomous input and releases held inputs. — verified
+  live against a real autonomous action (task 12 smoke test).
 
 ## Explicitly out of scope for v0.3
 

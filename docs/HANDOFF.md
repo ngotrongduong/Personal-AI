@@ -45,18 +45,20 @@ order. Local verification on the merged branch: compile check + ruff + pytest
 |-----------|------|-------|---------------|
 | #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
 | #8 `codex/v0.3-resource-bars` | `feature/v0.3-game-state` | Codex | v0.3: add HP/resource bar measurement (task 3). Not yet merged. |
-| `claude/live-detector-loop` (this work) | `feature/v0.3-game-state` | Claude | Task 11: wires `DetectorRegistry`/vision→`GameState` into the live Tk capture loop, shows multi-detector status in GUI/log. Live-smoke-tested on Windows (two named templates, both FOUND simultaneously; F8 verified unaffected). 31/31 tests, ruff clean. About to open as a PR. |
+| #9 `claude/live-detector-loop` | `feature/v0.3-game-state` | Claude | Task 11: wires `DetectorRegistry`/vision→`GameState` into the live Tk capture loop, shows multi-detector status in GUI/log. Live-smoke-tested on Windows (two named templates, both FOUND simultaneously; F8 verified unaffected). 31/31 tests, ruff clean. Open, not yet merged. |
+| `claude/action-dispatcher` (this work) | `claude/live-detector-loop` (stacked — PR #9 not yet merged) | Claude | Task 12: gated `ActionDispatcher` (`ActionIntent` → `InputController`), only dispatches when input control is explicitly enabled. New `agent/action_dispatcher.py`, wired into `main.py`'s vision loop via a new "Rules" UI section. Uses `self.capture.hwnd` (not the window-picker combobox) as the dispatch target — a safety-reviewer subagent caught that these can diverge and it was fixed pre-commit, with a regression test. Live-smoke-tested on Windows: real click correctly dispatched into a throwaway Notepad window once input control enabled, correctly blocked before that and after F8. 42/42 tests, ruff clean. Will need rebasing onto `feature/v0.3-game-state` (or PR #9's tip) once PR #9 merges. About to open as a PR. |
 
 Re-verify this table (`git branch -a`, open PRs) before merging or branching from
 any of it — it is a snapshot, not a live view.
 
 ### Next task
 
-Task 11 (live-loop wiring, above) is done pending PR review/merge. The next item
-in `docs/PLAN.md` is **task 12: gated action dispatcher** (`ActionIntent` →
-`InputController`, only when input control is explicitly enabled) — likely
-Claude's lane since it touches `core`/input safety, but not yet formally
-assigned in an Issue #1 comment. Confirm assignment there before starting.
+Task 11 (live-loop wiring, PR #9) is done pending PR review/merge. Task 12
+(gated action dispatcher, branch `claude/action-dispatcher`) is also done,
+live-smoke-tested, and about to open as a PR stacked on PR #9. Once both merge
+into `feature/v0.3-game-state`, remaining unassigned v0.3 items are tasks 3
+(HP/resource bars — in progress as PR #8) and 4 (basic OCR) — see
+`docs/PLAN.md`.
 
 ### Known blockers
 

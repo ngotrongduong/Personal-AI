@@ -12,7 +12,9 @@ from PIL import Image, ImageTk
 from pynput import keyboard
 import win32gui
 
+from agent.action_dispatcher import ActionDispatcher
 from agent.game_state import GameState
+from agent.rule_engine import RuleEngine, VisibilityRule
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
@@ -44,6 +46,8 @@ class PersonalGameAIApp:
         self.registry = DetectorRegistry()
         self.game_state = GameState()
         self._registry_visibility: dict[str, bool] = {}
+        self.rule_engine = RuleEngine()
+        self.dispatcher = ActionDispatcher(self.input)
 
         self.preview_photo = None
         self.preview_image_item = None
@@ -78,6 +82,11 @@ class PersonalGameAIApp:
         self.template_var = tk.StringVar(value="Template: none")
         self.detector_name_var = tk.StringVar(value="detector_1")
         self.detectors_var = tk.StringVar(value="Detectors: none registered")
+
+        self.rule_name_var = tk.StringVar(value="rule_1")
+        self.rule_detector_var = tk.StringVar(value="")
+        self.rule_min_confidence_var = tk.DoubleVar(value=0.82)
+        self.rules_var = tk.StringVar(value="Rules: 0 active. Input control still gates every dispatch.")
 
         self._build_ui()
         self.refresh_windows()
@@ -183,6 +192,45 @@ class PersonalGameAIApp:
         ).pack(anchor="w", padx=8)
         ttk.Label(
             vision_box, textvariable=self.detectors_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+
+        rules_box = ttk.LabelFrame(
+            outer, text="Rules — gated autonomous actions (only run when input control is enabled)"
+        )
+        rules_box.pack(fill="x", pady=(0, 8))
+
+        rules_row = ttk.Frame(rules_box)
+        rules_row.pack(fill="x", padx=8, pady=(7, 4))
+
+        ttk.Label(rules_row, text="Rule name:").pack(side="left")
+        ttk.Entry(rules_row, textvariable=self.rule_name_var, width=14).pack(
+            side="left", padx=(4, 12)
+        )
+
+        ttk.Label(rules_row, text="Detector:").pack(side="left")
+        ttk.Entry(rules_row, textvariable=self.rule_detector_var, width=14).pack(
+            side="left", padx=(4, 12)
+        )
+
+        ttk.Label(rules_row, text="Min confidence:").pack(side="left")
+        ttk.Spinbox(
+            rules_row,
+            from_=0.50,
+            to=0.99,
+            increment=0.01,
+            textvariable=self.rule_min_confidence_var,
+            width=6,
+        ).pack(side="left", padx=(4, 12))
+
+        ttk.Label(rules_row, text="Action: click").pack(side="left", padx=(0, 12))
+
+        ttk.Button(rules_row, text="Add Rule", command=self.add_rule).pack(side="left")
+        ttk.Button(
+            rules_row, text="Clear Rules", command=self.clear_rules
+        ).pack(side="left", padx=5)
+
+        ttk.Label(
+            rules_box, textvariable=self.rules_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
         info = ttk.Frame(outer)
@@ -423,6 +471,33 @@ class PersonalGameAIApp:
         self.detectors_var.set("Detectors: none registered")
         self.log("All named detectors cleared.")
 
+    def add_rule(self):
+        name = self.rule_name_var.get().strip()
+        detector_name = self.rule_detector_var.get().strip()
+        try:
+            min_confidence = float(self.rule_min_confidence_var.get())
+            rule = VisibilityRule(
+                name=name,
+                detector_name=detector_name,
+                action="click",
+                min_confidence=min_confidence,
+            )
+            self.rule_engine.add_rule(rule)
+        except ValueError as exc:
+            messagebox.showerror("Add Rule", str(exc))
+            return
+
+        self.rules_var.set(f"Rules: {len(self.rule_engine.rules)} active.")
+        self.log(
+            f"Rule added: '{name}' -> click on '{detector_name}' "
+            f"(min confidence {min_confidence:.2f}). Still gated by input control."
+        )
+
+    def clear_rules(self):
+        self.rule_engine = RuleEngine()
+        self.rules_var.set("Rules: 0 active.")
+        self.log("All rules cleared.")
+
     def save_snapshot(self):
         frame = self.latest_raw_frame
         if frame is None:
@@ -588,6 +663,32 @@ class PersonalGameAIApp:
                 parts.append(f"{name}={status}({detection.confidence:.2f})")
 
             self.detectors_var.set("Detectors: " + "  |  ".join(parts))
+
+        if self.rule_engine.rules:
+            intents = self.rule_engine.evaluate(self.game_state)
+            if intents:
+                # Use the window this frame actually came from, not whatever
+                # the window-picker combobox currently shows -- the two can
+                # diverge if the user reselects the combobox while capture
+                # keeps running against the original window, and a bbox from
+                # one window's frame is meaningless on another window's
+                # screen coordinates.
+                hwnd = self.capture.hwnd if self.capture else None
+
+                last_outcome = "blocked"
+                for intent in intents:
+                    result = self.dispatcher.dispatch(intent, hwnd=hwnd)
+                    last_outcome = "dispatched" if result.dispatched else "blocked"
+                    self.log(
+                        f"Rule '{intent.rule_name}' target={intent.detector_name} "
+                        f"confidence={intent.confidence:.2f} -> "
+                        f"{last_outcome.upper()}: {result.reason}"
+                    )
+
+                self.rules_var.set(
+                    f"Rules: {len(self.rule_engine.rules)} active. "
+                    f"Last: '{intents[-1].rule_name}' {last_outcome}."
+                )
 
     # ---------------- Preview ----------------
 
