@@ -67,10 +67,19 @@ and a docstring note on `plan_once` recording the fail-closed contract for
 future reviewers. Safety-reviewed PASS (docstring + tests only, no logic
 change). Merged via PR #26. 95/95 tests pass.
 
-Next up: task 6 (config surface: model name, host/port, poll interval,
-default-off toggle). Tasks 6-8 remain Codex's default lane; tasks 9 (real
-Ollama install + live smoke test) and 10 (optional UI) are Claude's/TBD
-lane per `AGENTS.md`'s default routing.
+**Task 6 is now done and merged**: `agent/planner_config.py` (`PlannerConfig`
++ `load_planner_config`, PR #31) adds the config surface — model name,
+Ollama host/port, poll interval, all reusing `OllamaClientConfig`'s own
+validation — plus an explicit `enabled` toggle that defaults to off at
+two independent layers (the loader's defaults, and the dataclass's own
+`__post_init__`), so it can't be silently turned on. Example block added
+to `configs/example_game_v0.3.json`. Not wired into `main.py`'s runtime
+yet (deliberately out of scope, same as `PlannerScheduler`). Safety-
+reviewed PASS. 114/114 tests pass.
+
+Next up: task 7 (planner decision log). Tasks 7-8 remain Codex's default
+lane; tasks 9 (real Ollama install + live smoke test) and 10 (optional
+UI) are Claude's/TBD lane per `AGENTS.md`'s default routing.
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
