@@ -32,7 +32,13 @@ class LlmPlanner:
         self._rule_engine = rule_engine
 
     def plan_once(self, state: GameState) -> PlannerOutcome:
-        """Apply one schema-valid rule directive, or safely retain the current rules."""
+        """Apply one schema-valid directive, failing closed on every error path.
+
+        Every supported failure path here--client failures, missing response
+        text, and directive-validation failures--fails closed by retaining the
+        exact current rule configuration; this contract is covered by
+        ``tests/test_llm_planner.py``.
+        """
 
         result = self._ollama_client.generate(self._build_prompt(state))
         if not result.successful:

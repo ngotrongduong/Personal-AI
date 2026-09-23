@@ -9,13 +9,20 @@ from agent.rule_engine import RuleEngine, VisibilityRule
 
 
 class FakeOllamaClient:
-    def __init__(self, result: OllamaResult) -> None:
+    def __init__(self, result: OllamaResult | MissingTextResult) -> None:
         self._result = result
         self.prompts: list[str] = []
 
-    def generate(self, prompt: str) -> OllamaResult:
+    def generate(self, prompt: str) -> OllamaResult | MissingTextResult:
         self.prompts.append(prompt)
         return self._result
+
+
+class MissingTextResult:
+    """Stub an otherwise-successful client result missing its required text."""
+
+    successful = True
+    text = None
 
 
 class LlmPlannerTests(unittest.TestCase):
@@ -34,9 +41,14 @@ class LlmPlannerTests(unittest.TestCase):
         self.state = GameState()
         self.state.update_detector("collect_button", visible=True, confidence=0.95, value="available")
 
-    def _planner(self, result: OllamaResult) -> tuple[LlmPlanner, FakeOllamaClient]:
+    def _planner(self, result: OllamaResult | MissingTextResult) -> tuple[LlmPlanner, FakeOllamaClient]:
         client = FakeOllamaClient(result)
         return LlmPlanner(client, self.engine), client
+
+    def _rule_enabled_state(self) -> tuple[tuple[str, bool], ...]:
+        """Return the complete enabled/disabled configuration in rule order."""
+
+        return tuple((rule.name, self.engine.is_rule_enabled(rule.name)) for rule in self.engine.rules)
 
     def test_valid_enable_directive_enables_disabled_rule(self) -> None:
         self.engine.disable_rule("click_collect")
@@ -72,38 +84,62 @@ class LlmPlannerTests(unittest.TestCase):
         self.assertEqual(outcome.message, "noop")
         self.assertFalse(outcome.changed)
 
-    def test_unsuccessful_ollama_result_keeps_rule_state_and_reports_error(self) -> None:
-        error = OllamaError(OllamaErrorKind.CONNECTION, "Ollama is not running.")
-        planner, _client = self._planner(OllamaResult(error=error))
+    def test_each_ollama_failure_keeps_exact_rule_state_and_reports_reason(self) -> None:
+        failures = (
+            (OllamaErrorKind.CONNECTION, "Ollama is not running."),
+            (OllamaErrorKind.TIMEOUT, "Ollama request timed out."),
+            (OllamaErrorKind.HTTP_STATUS, "Ollama returned HTTP 503."),
+            (OllamaErrorKind.RESPONSE_FORMAT, "Ollama returned invalid JSON."),
+        )
+
+        for error_kind, reason in failures:
+            with self.subTest(error_kind=error_kind):
+                self.engine.disable_rule("heal_low_hp")
+                rule_state_before = self._rule_enabled_state()
+                error = OllamaError(error_kind, reason)
+                planner, _client = self._planner(OllamaResult(error=error))
+
+                outcome = planner.plan_once(self.state)
+
+                self.assertEqual(self._rule_enabled_state(), rule_state_before)
+                self.assertFalse(outcome.changed)
+                self.assertIn("no change, Ollama error:", outcome.message)
+                self.assertIn(error_kind.value, outcome.message)
+                self.assertIn(reason, outcome.message)
+
+    def test_missing_response_text_keeps_exact_rule_state_and_reports_reason(self) -> None:
+        self.engine.disable_rule("heal_low_hp")
+        rule_state_before = self._rule_enabled_state()
+        planner, _client = self._planner(MissingTextResult())
 
         outcome = planner.plan_once(self.state)
 
-        self.assertTrue(self.engine.is_rule_enabled("click_collect"))
-        self.assertTrue(self.engine.is_rule_enabled("heal_low_hp"))
-        self.assertIn("no change, Ollama error:", outcome.message)
-        self.assertIn(error.message, outcome.message)
+        self.assertEqual(self._rule_enabled_state(), rule_state_before)
         self.assertFalse(outcome.changed)
+        self.assertIn("no directive text", outcome.message)
 
     def test_malformed_directive_keeps_rule_state_and_reports_rejection(self) -> None:
+        self.engine.disable_rule("heal_low_hp")
+        rule_state_before = self._rule_enabled_state()
         planner, _client = self._planner(OllamaResult(text="not valid JSON"))
 
         outcome = planner.plan_once(self.state)
 
-        self.assertTrue(self.engine.is_rule_enabled("click_collect"))
-        self.assertTrue(self.engine.is_rule_enabled("heal_low_hp"))
+        self.assertEqual(self._rule_enabled_state(), rule_state_before)
         self.assertIn("no change, rejected:", outcome.message)
         self.assertIn("not valid JSON", outcome.message)
         self.assertFalse(outcome.changed)
 
     def test_unknown_rule_directive_is_rejected_without_changing_rule_state(self) -> None:
+        self.engine.disable_rule("heal_low_hp")
+        rule_state_before = self._rule_enabled_state()
         planner, _client = self._planner(
             OllamaResult(text='{"type":"enable_rule","rule_name":"invented_rule"}')
         )
 
         outcome = planner.plan_once(self.state)
 
-        self.assertTrue(self.engine.is_rule_enabled("click_collect"))
-        self.assertTrue(self.engine.is_rule_enabled("heal_low_hp"))
+        self.assertEqual(self._rule_enabled_state(), rule_state_before)
         self.assertIn("no change, rejected:", outcome.message)
         self.assertIn("unknown rule", outcome.message)
         self.assertFalse(outcome.changed)
