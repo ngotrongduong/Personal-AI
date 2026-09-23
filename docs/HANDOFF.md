@@ -39,13 +39,21 @@ fails closed on any error, PR #20). Along the way, task 3 surfaced that
 first (`RuleEngine.enable_rule`/`disable_rule`/`is_rule_enabled`, PR #19)
 before task 3 could be built. Both PR #19 and PR #20 got an explicit
 `safety-reviewer` PASS before merging, since they touch the core
-LLM-to-rule-engine safety boundary. 89/89 tests pass on
-`feature/v0.4-llm-planner`.
+LLM-to-rule-engine safety boundary.
+
+A first attempt at task 4 then surfaced a second prerequisite gap:
+`RuleEngine` had no thread synchronization at all, which is a real data
+race once a background planner thread starts calling `enable_rule`/
+`disable_rule` concurrently with the main thread's per-frame `evaluate()`.
+Fixed with a `threading.RLock` matching `GameState`'s existing pattern
+(task 3b, PR #22, safety-reviewed PASS, new concurrency test). 90/90 tests
+pass on `feature/v0.4-llm-planner`.
 
 Next up: task 4 (planner cadence/timer isolated from the fast loop/Tk UI
-thread) — depends on task 3, ready to hand to Codex. Tasks 5-8 remain
-Codex's default lane; tasks 9 (real Ollama install + live smoke test) and
-10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default routing.
+thread) — depends on task 3 and 3b (both done), re-dispatched to Codex.
+Tasks 5-8 remain Codex's default lane; tasks 9 (real Ollama install + live
+smoke test) and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s
+default routing.
 
 **Operational note:** Codex's CLI sandbox intermittently denies git writes
 (can't reliably run `git checkout -b`/`git commit` itself, even though it
