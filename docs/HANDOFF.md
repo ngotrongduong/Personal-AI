@@ -17,25 +17,23 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-23)
 
-v0.3 ("Game State + Rules", Issue #1) is in progress on
-`feature/v0.3-game-state` (PR #2 into `main`, still draft).
+v0.3 ("Game State + Rules", Issue #1) is **done and merged into `main`**
+(PR #2, merge commit `ef3ad40`). Issue #1 is closed. All 10 planned items and
+all 5 acceptance criteria are satisfied — see `docs/PLAN.md` for the per-task
+breakdown. 64/64 tests pass, ruff clean, on `main`.
+
+Next milestone per `docs/ROADMAP.md`: **v0.4 — Local AI planner** (LM Studio/Ollama
+backend for high-level strategy; fast reactions stay deterministic/state-machine
+based). No branch/issue opened for it yet.
 
 Claude handles work that genuinely needs the user's Windows machine. Codex/ChatGPT
 defaults to pure logic, algorithms, tests, docs, and config.
 
-### Merged into `feature/v0.3-game-state`
+### v0.3 history (for reference)
 
 PRs #3 (collab tooling), #6 (Issue #4 callback fix), #5 (Multiple Named
-Detectors → GameState), and #7 (handoff/plan tracking docs) are merged.
-
-Claude independently verified the pre-#7 integration state with compile + Ruff +
-pytest **28/28 pass**. PR #7 is docs/coordination only.
-
-| PR/branch | Base | Owner | What it does |
-|-----------|------|-------|---------------|
-| #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
-
-### Merged since last update
+Detectors → GameState), and #7 (handoff/plan tracking docs) were merged into
+`feature/v0.3-game-state` early in the milestone.
 
 PR #8 (`codex/v0.3-resource-bars`, task 3: HP/resource bar measurement) —
 cross-checked on Windows with `scripts/test.ps1` (41/41 pass, ruff clean),
@@ -66,12 +64,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-All of tasks 1-12 in `docs/PLAN.md` are now Done. All five acceptance criteria
-listed there are satisfied. Next: re-check `docs/PLAN.md`'s acceptance criteria
-against Issue #1 to confirm v0.3 is ready to come out of draft (PR #2 into `main`),
-or decide what's left before that.
+Start scoping v0.4 (local AI planner) per `docs/ROADMAP.md`: decide LM Studio vs.
+Ollama, define the boundary between the deterministic rule engine (fast reactions,
+already built in v0.3) and the local-LLM planner (high-level strategy only), and
+open a tracking issue before assigning implementation work.
 
-Re-check GitHub before merging because this table is a snapshot.
+Re-check GitHub before starting new work because this file is a snapshot.
 
 ### Known blocker
 
@@ -88,10 +86,7 @@ Record that local verification explicitly in each PR.
 
 ### Open issue
 
-- **#1** — v0.3 Game State + Rules. `docs/PLAN.md` mirrors its checklist with
-  status/owner columns.
-
-Issue #4 is completed and merged via PR #6.
+None open right now. Issue #1 (v0.3) and Issue #4 are both completed/closed.
 
 ## Lessons
 

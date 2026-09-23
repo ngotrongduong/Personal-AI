@@ -19,23 +19,25 @@
 - Match score and coordinates.
 - Snapshot capture.
 
-## Next — v0.3 Game State + Rules
-
-Planned:
+### Stage 3 — Game State + Rules (v0.3, Issue #1, closed)
 - Multiple named detectors per game profile.
 - Region-of-interest definitions.
 - HP/resource bar measurement.
-- OCR for simple text/numbers.
+- OCR for simple text/numbers (real-Tesseract smoke-tested on Windows).
 - Persistent game-state variables.
 - Safe rule engine such as `IF CollectButton.visible THEN click`.
 - Action cooldowns and debouncing to prevent repeated accidental input.
+- Gated action dispatcher (`ActionIntent` → `InputController`), F8 emergency
+  stop verified live against a real autonomous action.
 
-## Later
+## Next — v0.4 Local AI planner
 
-### v0.4 — Local AI planner
 - LM Studio or Ollama backend.
 - Local LLM used only for high-level strategy/planning.
-- Fast game reactions remain deterministic/state-machine based.
+- Fast game reactions remain deterministic/state-machine based (v0.3's rule
+  engine + action dispatcher).
+
+## Later
 
 ### v0.5 — Demonstration recording
 - Record screen state plus the user's actions.
