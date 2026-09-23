@@ -72,14 +72,29 @@ default-off toggle). Tasks 6-8 remain Codex's default lane; tasks 9 (real
 Ollama install + live smoke test) and 10 (optional UI) are Claude's/TBD
 lane per `AGENTS.md`'s default routing.
 
-**Unreviewed branches spotted on origin (not yet acted on):**
-`codex/v0.4-model-foundation` (1 commit: "feat(v0.4): add local model
-catalog, Ollama provider, and role router" — not delegated by Claude this
-session, needs review against the v0.4 design constraint before anything
-merges) and `codex/v0.3-release-metadata` (2 commits against `main`:
-app version metadata + architecture doc update for v0.3). Check these
-before assuming `docs/PLAN.md`'s v0.4 checklist is the only work in
-flight.
+**Previously-unreviewed branches: both resolved (2026-09-23).** The two
+external Codex branches noted above turned out to originate from the user
+separately asking ChatGPT to research useful local AI models on GitHub.
+Both were reviewed (dry-run 3-way merge test + full test suite +
+`safety-reviewer` PASS) and merged:
+
+- `codex/v0.4-model-foundation` → merged into `feature/v0.4-llm-planner`
+  via PR #29. Adds the `model_runtime` package (see "Foundational
+  infrastructure" in `docs/PLAN.md`). Purely additive, doesn't touch the
+  planner/dispatcher safety boundary, never auto-downloads models.
+- `codex/v0.3-release-metadata` → its raw diff against `main` looked like
+  a regression at first glance (it appeared to delete `vision/ocr.py`
+  etc.) because the branch was based on a pre-OCR commit — those were
+  divergence artifacts, not real changes. A real 3-way merge test showed
+  it only fixes two things: `main.py`'s `APP_VERSION` was still `"0.2.0"`
+  despite v0.3 being fully merged, and `docs/ARCHITECTURE.md` still
+  described the dispatcher as future work. Merged into `main` via PR #28
+  (squash), 64/64 tests pass, no files deleted.
+
+Both throwaway local test branches and the merged remote branches have
+been deleted. `main` is now at `APP_VERSION = "0.3.0"` with an accurate
+architecture doc; `feature/v0.4-llm-planner` has 107/107 tests passing
+(94 planner tests + 13 new `model_runtime` tests).
 
 **Operational note:** Codex's CLI sandbox intermittently denies git writes
 (can't reliably run `git checkout -b`/`git commit` itself, even though it
