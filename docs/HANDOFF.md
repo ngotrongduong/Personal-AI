@@ -77,9 +77,20 @@ to `configs/example_game_v0.3.json`. Not wired into `main.py`'s runtime
 yet (deliberately out of scope, same as `PlannerScheduler`). Safety-
 reviewed PASS. 114/114 tests pass.
 
-Next up: task 7 (planner decision log). Tasks 7-8 remain Codex's default
-lane; tasks 9 (real Ollama install + live smoke test) and 10 (optional
-UI) are Claude's/TBD lane per `AGENTS.md`'s default routing.
+**Task 7 is now done and merged**: `PlannerScheduler._run` was discarding
+`LlmPlanner.plan_once`'s `PlannerOutcome` return value entirely, so
+nothing observed planner decisions unless a cycle raised an exception.
+Fixed by logging the outcome (accepted directive / rejected+reason /
+Ollama error, already encoded in `PlannerOutcome.message`) at INFO after
+each successful cycle, mirroring `main.py`'s existing DISPATCHED/BLOCKED
+logging for `ActionDispatcher`. No change to `LlmPlanner`, `RuleEngine`,
+`OllamaClient`, `ActionDispatcher`, or `main.py`. Safety-reviewed PASS
+(no findings). PR #33. 115/115 tests pass.
+
+Next up: task 8 (tests with a fake/stub Ollama client). Task 8 remains
+Codex's default lane; tasks 9 (real Ollama install + live smoke test)
+and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default
+routing.
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
