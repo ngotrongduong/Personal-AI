@@ -57,14 +57,29 @@ Ollama/network error can't kill the thread). Not yet wired into
 `main.py`'s lifecycle — that's a separate future task. Safety-reviewed
 PASS. 94/94 tests pass on `feature/v0.4-llm-planner`.
 
-Next up: task 5 (fallback/timeout handling — largely already covered by
-`LlmPlanner.plan_once`'s fail-closed behavior and `PlannerScheduler`'s
-per-cycle exception isolation, so this task may mostly be about verifying/
-documenting that coverage rather than new code) or task 6 (config surface:
-model name, host/port, poll interval, default-off toggle). Tasks 5-8
-remain Codex's default lane; tasks 9 (real Ollama install + live smoke
-test) and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default
-routing.
+**Task 5 is now done and merged**: as expected, `LlmPlanner.plan_once` and
+`PlannerScheduler` already failed closed on every Ollama/validation error
+path, so this task was verification + documentation rather than new logic.
+Added explicit test coverage in `tests/test_llm_planner.py` (full rule-state
+snapshot comparison across CONNECTION/TIMEOUT/HTTP_STATUS/RESPONSE_FORMAT
+Ollama errors, missing response text, and directive-validation rejection)
+and a docstring note on `plan_once` recording the fail-closed contract for
+future reviewers. Safety-reviewed PASS (docstring + tests only, no logic
+change). Merged via PR #26. 95/95 tests pass.
+
+Next up: task 6 (config surface: model name, host/port, poll interval,
+default-off toggle). Tasks 6-8 remain Codex's default lane; tasks 9 (real
+Ollama install + live smoke test) and 10 (optional UI) are Claude's/TBD
+lane per `AGENTS.md`'s default routing.
+
+**Unreviewed branches spotted on origin (not yet acted on):**
+`codex/v0.4-model-foundation` (1 commit: "feat(v0.4): add local model
+catalog, Ollama provider, and role router" — not delegated by Claude this
+session, needs review against the v0.4 design constraint before anything
+merges) and `codex/v0.3-release-metadata` (2 commits against `main`:
+app version metadata + architecture doc update for v0.3). Check these
+before assuming `docs/PLAN.md`'s v0.4 checklist is the only work in
+flight.
 
 **Operational note:** Codex's CLI sandbox intermittently denies git writes
 (can't reliably run `git checkout -b`/`git commit` itself, even though it
