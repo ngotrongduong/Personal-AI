@@ -87,10 +87,22 @@ logging for `ActionDispatcher`. No change to `LlmPlanner`, `RuleEngine`,
 `OllamaClient`, `ActionDispatcher`, or `main.py`. Safety-reviewed PASS
 (no findings). PR #33. 115/115 tests pass.
 
-Next up: task 8 (tests with a fake/stub Ollama client). Task 8 remains
-Codex's default lane; tasks 9 (real Ollama install + live smoke test)
-and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default
-routing.
+**Task 8 is now done and merged**: existing tests already used injected
+fake Ollama transports throughout, so this filled the remaining untested
+branches — Ollama response-format edge cases (missing/non-string
+`response`, non-UTF-8 body), `URLError`-wrapped timeouts, schema
+rejection of malformed/prose-wrapped/action-smuggling/case-variant
+directives — plus the first composed end-to-end test
+(`tests/test_planner_integration.py`: real `OllamaClient` with fake
+transport → `LlmPlanner` → `RuleEngine`, driven by `PlannerScheduler`'s
+background thread). Tests only, no production change, no bugs found.
+Safety-reviewed PASS. PR #35. 128/128 tests pass.
+
+Next up: task 9 (real Ollama Windows install + live smoke test —
+Claude/machine-required lane) or task 10 (optional minimal planner UI,
+TBD). Note that `PlannerScheduler`/`PlannerConfig` are still not wired
+into `main.py`; task 9's live test will need that wiring (or a small
+harness) to exercise the planner end-to-end.
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
@@ -160,12 +172,9 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Delegate v0.4 task 5 (fallback/timeout handling) or task 6 (config surface) to
-Codex — see `docs/PLAN.md`'s checklist notes for task 5 on why it may mostly be
-verification/docs rather than new code, since `LlmPlanner.plan_once` (PR #20)
-and `PlannerScheduler` (PR #24) already fail closed and isolate exceptions.
-Depends on task 4 (done, PR #24). PRs target `feature/v0.4-llm-planner`, not
-`main`.
+v0.4 task 9 (real Ollama install + live smoke test on Windows, Claude's lane)
+or task 10 (optional UI). Tasks 1-8 are done. PRs target
+`feature/v0.4-llm-planner`, not `main`.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
