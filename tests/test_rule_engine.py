@@ -80,6 +80,42 @@ class RuleEngineTests(unittest.TestCase):
         )
         self.assertEqual(self.engine.evaluate(self.state, now=11.0), [])
 
+    def test_disable_then_enable_rule_controls_evaluation(self) -> None:
+        self.state.update_detector(
+            "collect_button",
+            visible=True,
+            confidence=0.95,
+            observed_at=10.0,
+        )
+
+        self.engine.disable_rule("click_collect")
+        self.assertFalse(self.engine.is_rule_enabled("click_collect"))
+        self.assertEqual(self.engine.evaluate(self.state, now=10.1), [])
+
+        self.engine.enable_rule("click_collect")
+        self.assertTrue(self.engine.is_rule_enabled("click_collect"))
+        self.assertEqual(len(self.engine.evaluate(self.state, now=10.1)), 1)
+
+    def test_enable_and_disable_unknown_rule_raise_value_error(self) -> None:
+        with self.assertRaises(ValueError):
+            self.engine.disable_rule("unknown")
+        with self.assertRaises(ValueError):
+            self.engine.enable_rule("unknown")
+
+    def test_disabling_rule_preserves_existing_cooldown(self) -> None:
+        self.state.update_detector(
+            "collect_button",
+            visible=True,
+            confidence=0.95,
+            observed_at=10.0,
+        )
+        self.assertEqual(len(self.engine.evaluate(self.state, now=10.1)), 1)
+
+        self.engine.disable_rule("click_collect")
+        self.assertEqual(self.engine.evaluate(self.state, now=10.2), [])
+        self.engine.enable_rule("click_collect")
+        self.assertEqual(self.engine.evaluate(self.state, now=10.5), [])
+
 
 if __name__ == "__main__":
     unittest.main()
