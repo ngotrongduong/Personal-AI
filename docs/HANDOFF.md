@@ -34,8 +34,7 @@ pytest **28/28 pass**. PR #7 is docs/coordination only.
 | PR/branch | Base | Owner | What it does |
 |-----------|------|-------|---------------|
 | #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
-| #10 `claude/action-dispatcher` | `feature/v0.3-game-state` | Claude | Task 12: gated `ActionIntent` → `InputController` dispatcher (input-enabled/F8, supported-action, freshness, resolvable-target gates). New `agent/action_dispatcher.py`, wired into `main.py`'s vision loop via a new "Rules" UI section. Uses `self.capture.hwnd` (not the window-picker combobox) as the dispatch target — a safety-reviewer subagent caught that these can diverge and it was fixed pre-commit, with a regression test. Live-smoke-tested on Windows: real click correctly dispatched into a throwaway Notepad window once input control enabled, correctly blocked before that and after F8. 42/42 tests, ruff clean. Retargeted directly onto `feature/v0.3-game-state` now that PR #9 merged. |
-| `codex/v0.3-ocr` | `feature/v0.3-game-state` | Codex | Task 4: OCR (`OcrEngine`/`PytesseractEngine` design), assigned via Issue #1 comment. In progress. |
+| `codex/v0.3-ocr` | `feature/v0.3-game-state` | Codex | Task 4: OCR (`OcrEngine`/`PytesseractEngine` design), assigned via Issue #1 comment. No branch/PR pushed yet as of this check. |
 
 ### Merged since last update
 
@@ -47,12 +46,22 @@ PR #9 (`claude/live-detector-loop`, task 11: wire `DetectorRegistry`/vision→`G
 into the live Tk capture loop) — live-smoke-tested on Windows (two named templates,
 both FOUND simultaneously; F8 verified unaffected). 31/31 tests, ruff clean.
 
+PR #10 (`claude/action-dispatcher`, task 12: gated `ActionIntent` → `InputController`
+dispatcher) — input-enabled/F8, supported-action, freshness, resolvable-target gates.
+New `agent/action_dispatcher.py`, wired into `main.py`'s vision loop via a new "Rules"
+UI section. Uses `self.capture.hwnd` (not the window-picker combobox) as the dispatch
+target — a safety-reviewer subagent caught that these can diverge and it was fixed
+pre-commit, with a regression test. Live-smoke-tested on Windows: real click correctly
+dispatched into a throwaway Notepad window once input control enabled, correctly
+blocked before that and after F8. Squash-merged into `feature/v0.3-game-state`;
+55/55 tests pass, ruff clean on the merged branch.
+
 ### Next task
 
-Tasks 3, 11, and 12 are done. Task 4 (OCR) is assigned to and in progress with
-Codex on `codex/v0.3-ocr` — Claude will install real Tesseract and live-smoke-test
-once that PR is up. After that, re-check `docs/PLAN.md`'s acceptance criteria for
-what's left in v0.3.
+Tasks 3, 11, and 12 are done. Task 4 (OCR) is assigned to Codex via an Issue #1
+comment but no `codex/v0.3-ocr` branch/PR exists yet — next check-in should follow
+up there. Once it's up, Claude will install real Tesseract and live-smoke-test it.
+After that, re-check `docs/PLAN.md`'s acceptance criteria for what's left in v0.3.
 
 Re-check GitHub before merging because this table is a snapshot.
 
