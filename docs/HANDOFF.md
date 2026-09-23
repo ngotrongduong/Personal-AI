@@ -18,13 +18,18 @@ file and `docs/PLAN.md` in the same push as the work.
 ## Right now (2026-09-23)
 
 v0.3 ("Game State + Rules", Issue #1) is **done and merged into `main`**
-(PR #2, merge commit `ef3ad40`). Issue #1 is closed. All 10 planned items and
-all 5 acceptance criteria are satisfied — see `docs/PLAN.md` for the per-task
-breakdown. 64/64 tests pass, ruff clean, on `main`.
+(PR #2, merge commit `ef3ad40`). Issue #1 is closed. 64/64 tests pass, ruff
+clean, on `main`.
 
-Next milestone per `docs/ROADMAP.md`: **v0.4 — Local AI planner** (LM Studio/Ollama
-backend for high-level strategy; fast reactions stay deterministic/state-machine
-based). No branch/issue opened for it yet.
+**v0.4 ("Local AI Planner", Issue #15) is now scoped and in progress** on
+`feature/v0.4-llm-planner`. Backend decision: **Ollama** (user confirmed,
+2026-09-23) — headless REST API, no GUI dependency, fits local scripted
+verification. See `docs/PLAN.md` for the full checklist/design constraint
+(the planner proposes directives from a closed vocabulary; it can never
+synthesize raw input or bypass any v0.3 safety gate). No sub-task branches
+opened yet — ready to start handing tasks 1-8 to Codex (pure logic/tests,
+no machine access needed); tasks 9 (real Ollama install + live smoke test)
+and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default routing.
 
 Claude handles work that genuinely needs the user's Windows machine. Codex/ChatGPT
 defaults to pure logic, algorithms, tests, docs, and config.
@@ -64,10 +69,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Start scoping v0.4 (local AI planner) per `docs/ROADMAP.md`: decide LM Studio vs.
-Ollama, define the boundary between the deterministic rule engine (fast reactions,
-already built in v0.3) and the local-LLM planner (high-level strategy only), and
-open a tracking issue before assigning implementation work.
+Delegate v0.4 task 1 (Ollama HTTP client wrapper) and task 2 (planner directive
+schema + validator) to Codex via the `codex-rescue` CLI invocation — both are
+pure logic/tests, no machine access needed, and task 3 (`agent/llm_planner.py`)
+depends on both. PRs target `feature/v0.4-llm-planner`, not `main`.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
@@ -86,7 +91,10 @@ Record that local verification explicitly in each PR.
 
 ### Open issue
 
-None open right now. Issue #1 (v0.3) and Issue #4 are both completed/closed.
+- **#15** — v0.4 Local AI Planner. `docs/PLAN.md` mirrors its checklist with
+  status/owner columns.
+
+Issue #1 (v0.3) and Issue #4 are both completed/closed.
 
 ## Lessons
 
