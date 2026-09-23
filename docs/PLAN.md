@@ -19,14 +19,14 @@ game state and performing safe rule-based actions.
 |---|------|--------|-------|-------|
 | 1 | Multiple named visual detectors per game profile | Pure logic done | Codex (PR #5) | `vision/detector_registry.py`. Not yet wired into the live Tk capture loop — that's task 11. |
 | 2 | Configurable regions of interest (ROI) | Done | Codex (PR #5) | ROI → full-frame bbox translation, with tests. |
-| 3 | HP/resource bar measurement | Not started | Unassigned | Pure logic, no machine needed — good Codex candidate. |
-| 4 | Basic OCR for simple text/numbers | Not started | Unassigned | Pure logic (given a frame/ROI in, text out) — good Codex candidate; picking an OCR dependency needs a quick decision first. |
+| 3 | HP/resource bar measurement | Done | Codex (PR #8) | HSV/ROI measurement for horizontal/vertical bars, four fill directions, multiple color ranges, gap tolerance, confidence, GameState bridge, synthetic tests. Cross-checked with `scripts/test.ps1` on Windows (41/41 pass, ruff clean) before merge. |
+| 4 | Basic OCR for simple text/numbers | Assigned to Codex | Codex (`codex/v0.3-ocr`, in progress) | Pure logic (given a frame/ROI in, text out); assigned via Issue #1 comment. `PytesseractEngine` implementation + fake-engine-testable abstraction; Claude will install real Tesseract and live-smoke-test once Codex's PR lands. |
 | 5 | Persistent game-state variables | Done | Codex (PR #2) | `agent/game_state.py` (`GameState`, `Observation`). |
 | 6 | Safe rule engine (`IF X.visible THEN click`) | Done | Codex (PR #2) | `agent/rule_engine.py` (`RuleEngine`, `VisibilityRule`). Produces `ActionIntent`s only — nothing dispatches them yet. |
 | 7 | Action cooldowns/debouncing | Done | Codex (PR #2) | Built into `RuleEngine` (monotonic-time cooldown per rule). |
-| 8 | Action log (rule, target, confidence, result) | Not started | Unassigned | Needs the dispatcher (task 12) to exist first — nothing produces a "result" yet. |
-| 9 | F8 global emergency stop active for every autonomous action | Behavior preserved, not yet exercised by an autonomous action | Claude | Verified via live smoke test that F8/input-enable still work correctly (Issue #4 fix). Revisit once a dispatcher exists. |
-| 10 | Test the full loop on a harmless/offline target before any real game profile | Blocked on task 11 | Claude | This is the live smoke test — needs the live-loop wiring below first. |
+| 8 | Action log (rule, target, confidence, result) | Done | Claude (task 12, PR #10) | Satisfied as a side effect of task 12: `main.py`'s `_run_vision_if_due` logs `Rule '<name>' target=<detector> confidence=<c> -> DISPATCHED/BLOCKED: <reason>` for every dispatch attempt. |
+| 9 | F8 global emergency stop active for every autonomous action | Done | Claude | Verified live with a real autonomous action now dispatched (task 12, PR #10): F8 immediately flips `input.enabled` off, further rule firings log `BLOCKED: Input control is disabled.`, and vision/detection keeps running unaffected. |
+| 10 | Test the full loop on a harmless/offline target before any real game profile | Done | Claude | Live-smoke-tested task 12's dispatcher end-to-end against a throwaway Notepad window (PR #10). |
 
 ## Not part of this checklist (tracked separately)
 
@@ -35,8 +35,8 @@ not from Issue #1's original scope — tracked here so they don't get lost:
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Done, PR open | Claude | Branch `claude/live-detector-loop`. `_selection_release` now also registers the dragged ROI into `DetectorRegistry`; `_run_vision_if_due` runs `detect_all` each tick and feeds results through `apply_detections` into `GameState`, updating a `Detectors:` status line and logging FOUND/LOST transitions. Legacy single-template path untouched. Live-smoke-tested on Windows with two named templates (`line1`, `line3`) against a real Notepad window — both showed simultaneous `FOUND(1.00)`; confirmed F8 emergency stop still works and vision keeps running after it (vision never sends input). 31/31 tests pass, ruff clean. |
-| 12 | Gated action dispatcher (`ActionIntent` → `InputController`, only when input explicitly enabled) | Not started | Unassigned, likely Claude (touches `core`/input safety) | Described in `docs/ARCHITECTURE.md`. Prerequisite for tasks 8 and the acceptance criteria below. |
+| 11 | Wire `DetectorRegistry`/vision→GameState bridge into the live Tk capture loop; show multiple live detector states in GUI/log | Done | Claude | `_selection_release` now also registers the dragged ROI into `DetectorRegistry`; `_run_vision_if_due` runs `detect_all` each tick and feeds results through `apply_detections` into `GameState`, updating a `Detectors:` status line and logging FOUND/LOST transitions. Legacy single-template path untouched. Live-smoke-tested on Windows with two named templates (`line1`, `line3`) against a real Notepad window — both showed simultaneous `FOUND(1.00)`; confirmed F8 emergency stop still works and vision keeps running after it (vision never sends input). 31/31 tests pass, ruff clean. |
+| 12 | Gated action dispatcher (`ActionIntent` → `InputController`, only when input explicitly enabled) | Done, PR open (#10) | Claude | Branch `claude/action-dispatcher`, stacked on this branch. See PR #10 for full details — enforces input-enabled/F8, supported-action, intent-freshness, and resolvable-target gates before any dispatch; live-smoke-tested on Windows. |
 
 ## Acceptance criteria (from Issue #1, unchanged)
 
