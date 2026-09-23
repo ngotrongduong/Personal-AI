@@ -31,13 +31,28 @@ Detectors → GameState), and #7 (handoff/plan tracking docs) are merged.
 Claude independently verified the pre-#7 integration state with compile + Ruff +
 pytest **28/28 pass**. PR #7 is docs/coordination only.
 
-### Active work
+| PR/branch | Base | Owner | What it does |
+|-----------|------|-------|---------------|
+| #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
+| #10 `claude/action-dispatcher` | `feature/v0.3-game-state` | Claude | Task 12: gated `ActionIntent` → `InputController` dispatcher (input-enabled/F8, supported-action, freshness, resolvable-target gates). Live-smoke-tested on Windows. Open, needs rebasing onto the new tip once this branch merges. |
+| `codex/v0.3-ocr` | `feature/v0.3-game-state` | Codex | Task 4: OCR (`OcrEngine`/`PytesseractEngine` design), assigned via Issue #1 comment. In progress. |
 
-| Branch/task | Owner | What it does |
-|-------------|-------|--------------|
-| `feature/v0.3-game-state` / PR #2 | Codex | v0.3 integration branch |
-| Task #11 | Claude | Wire DetectorRegistry/vision→GameState into the live Tk capture loop and smoke-test at least two named templates |
-| `codex/v0.3-resource-bars` / Task #3 | Codex | Pure HP/resource-bar measurement + GameState bridge; isolated tests 13/13 pass before push |
+### Merged since last update
+
+PR #8 (`codex/v0.3-resource-bars`, task 3: HP/resource bar measurement) —
+cross-checked on Windows with `scripts/test.ps1` (41/41 pass, ruff clean),
+squash-merged into `feature/v0.3-game-state`.
+
+PR #9 (`claude/live-detector-loop`, task 11: wire `DetectorRegistry`/vision→`GameState`
+into the live Tk capture loop) — live-smoke-tested on Windows (two named templates,
+both FOUND simultaneously; F8 verified unaffected). 31/31 tests, ruff clean.
+
+### Next task
+
+Tasks 3, 11, and 12 are done. Task 4 (OCR) is assigned to and in progress with
+Codex on `codex/v0.3-ocr` — Claude will install real Tesseract and live-smoke-test
+once that PR is up. After that, re-check `docs/PLAN.md`'s acceptance criteria for
+what's left in v0.3.
 
 Re-check GitHub before merging because this table is a snapshot.
 
