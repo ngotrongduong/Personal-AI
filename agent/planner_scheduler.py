@@ -106,7 +106,8 @@ class PlannerScheduler:
         try:
             while not stop_event.is_set():
                 try:
-                    self._planner.plan_once(self._state)
+                    outcome = self._planner.plan_once(self._state)
+                    logger.info("Planner cycle outcome: %s", outcome)
                 except Exception:
                     logger.exception("Planner scheduler cycle failed; retaining current rule settings.")
 

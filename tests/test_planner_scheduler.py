@@ -9,14 +9,20 @@ from agent.planner_scheduler import PlannerScheduler
 
 
 class FakePlanner:
-    def __init__(self, *, fail_first_call: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        fail_first_call: bool = False,
+        outcome: object = None,
+    ) -> None:
         self._fail_first_call = fail_first_call
+        self._outcome = outcome
         self._lock = threading.Lock()
         self.call_times: list[float] = []
         self.thread_ids: list[int] = []
         self._call_events: dict[int, threading.Event] = {}
 
-    def plan_once(self, _state: GameState) -> None:
+    def plan_once(self, _state: GameState) -> object:
         with self._lock:
             self.call_times.append(time.monotonic())
             self.thread_ids.append(threading.get_ident())
@@ -27,6 +33,8 @@ class FakePlanner:
 
         if self._fail_first_call and call_count == 1:
             raise RuntimeError("planned test failure")
+
+        return self._outcome
 
     def wait_for_calls(self, expected_count: int) -> threading.Event:
         event = threading.Event()
@@ -98,6 +106,18 @@ class PlannerSchedulerTests(unittest.TestCase):
         self.assertGreaterEqual(planner.call_count, 2)
         self.assertTrue(any("Planner scheduler cycle failed" in message for message in logs.output))
         self.assertFalse(scheduler.is_running)
+
+    def test_logs_each_successful_cycle_outcome(self) -> None:
+        outcome = "accepted planner directive sentinel"
+        planner = FakePlanner(outcome=outcome)
+        scheduler = self._scheduler(planner)
+
+        with self.assertLogs("agent.planner_scheduler", level="INFO") as logs:
+            self.assertTrue(scheduler.start())
+            self.assertTrue(planner.wait_for_calls(1).wait(timeout=1.0))
+            scheduler.stop()
+
+        self.assertTrue(any(outcome in message for message in logs.output))
 
     def test_start_and_stop_are_safe_and_support_restart(self) -> None:
         planner = FakePlanner()
