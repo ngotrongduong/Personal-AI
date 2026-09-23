@@ -78,9 +78,9 @@ class PytesseractEngine:
             try:
                 value = float(confidence)
             except (TypeError, ValueError):
-                continue
-            if value < 0.0:
-                continue
+                value = 0.0
+            if not np.isfinite(value) or value < 0.0:
+                value = 0.0
             words.append(word)
             confidences.append(value / 100.0)
 

@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import sys
 import unittest
+from types import SimpleNamespace
+from unittest.mock import patch
 
 import numpy as np
 
-from vision.ocr import OcrEngine, OcrResult, OcrSpec, measure_ocr
+from vision.ocr import OcrEngine, OcrResult, OcrSpec, PytesseractEngine, measure_ocr
 
 
 class FakeOcrEngine(OcrEngine):
@@ -20,6 +23,40 @@ class FakeOcrEngine(OcrEngine):
 
 
 class OcrTests(unittest.TestCase):
+    def test_pytesseract_keeps_text_with_negative_confidence(self) -> None:
+        calls: list[dict[str, object]] = []
+
+        def image_to_data(_image: np.ndarray, **kwargs: object) -> dict[str, list[object]]:
+            calls.append(kwargs)
+            return {
+                "text": ["", "742", "99"],
+                "conf": ["-1", "-1", "80"],
+            }
+
+        pytesseract = SimpleNamespace(
+            Output=SimpleNamespace(DICT=object()),
+            image_to_data=image_to_data,
+        )
+        with patch.dict(sys.modules, {"pytesseract": pytesseract}):
+            result = PytesseractEngine().read_text(
+                np.zeros((10, 10, 3), dtype=np.uint8),
+                whitelist="0123456789",
+            )
+
+        self.assertEqual(result.text, "742 99")
+        self.assertEqual(result.confidence, 0.4)
+        self.assertEqual(calls[0]["config"], "--psm 7 -c tessedit_char_whitelist=0123456789")
+
+    def test_pytesseract_returns_empty_result_for_empty_entries(self) -> None:
+        pytesseract = SimpleNamespace(
+            Output=SimpleNamespace(DICT=object()),
+            image_to_data=lambda _image, **_kwargs: {"text": ["", "  "], "conf": ["-1", "-1"]},
+        )
+        with patch.dict(sys.modules, {"pytesseract": pytesseract}):
+            result = PytesseractEngine().read_text(np.zeros((10, 10, 3), dtype=np.uint8))
+
+        self.assertEqual(result, OcrResult(text="", confidence=0.0))
+
     def test_crops_roi_before_calling_engine(self) -> None:
         frame = np.arange(10 * 12 * 3, dtype=np.uint8).reshape(10, 12, 3)
         engine = FakeOcrEngine(OcrResult("Ready", 0.95))

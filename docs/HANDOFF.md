@@ -34,7 +34,7 @@ pytest **28/28 pass**. PR #7 is docs/coordination only.
 | PR/branch | Base | Owner | What it does |
 |-----------|------|-------|---------------|
 | #2 `feature/v0.3-game-state` | `main` | Codex | v0.3 integration branch itself, still draft |
-| `codex/v0.3-ocr` | `feature/v0.3-game-state` | Codex | Task 4: OCR implementation ready for draft PR: `OcrEngine`/optional `PytesseractEngine`, clipped ROI reads, whitelist and confidence filtering, GameState bridge, fake-engine tests. Real Tesseract remains a Windows smoke-test follow-up. |
+| `codex/v0.3-ocr` | `feature/v0.3-game-state` | Codex | Task 4: OCR implementation ready for draft PR: `OcrEngine`/optional `PytesseractEngine`, clipped ROI reads, whitelist and confidence filtering (including retaining non-empty text when Tesseract reports `-1` confidence after whitelist filtering), GameState bridge, fake-engine tests. Real Tesseract remains a Windows smoke-test follow-up. |
 
 ### Merged since last update
 
