@@ -46,14 +46,25 @@ A first attempt at task 4 then surfaced a second prerequisite gap:
 race once a background planner thread starts calling `enable_rule`/
 `disable_rule` concurrently with the main thread's per-frame `evaluate()`.
 Fixed with a `threading.RLock` matching `GameState`'s existing pattern
-(task 3b, PR #22, safety-reviewed PASS, new concurrency test). 90/90 tests
-pass on `feature/v0.4-llm-planner`.
+(task 3b, PR #22, safety-reviewed PASS, new concurrency test).
 
-Next up: task 4 (planner cadence/timer isolated from the fast loop/Tk UI
-thread) — depends on task 3 and 3b (both done), re-dispatched to Codex.
-Tasks 5-8 remain Codex's default lane; tasks 9 (real Ollama install + live
-smoke test) and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s
-default routing.
+**Task 4 is now done and merged**: `agent/planner_scheduler.py`
+(`PlannerScheduler`, PR #24) runs `LlmPlanner.plan_once` on its own daemon
+background thread at a configurable interval (default 5s), fully isolated
+from the Tk UI thread and the fast loop. Idempotent `start()`/`stop()`,
+prompt interruptible shutdown, per-cycle exception isolation (one bad
+Ollama/network error can't kill the thread). Not yet wired into
+`main.py`'s lifecycle — that's a separate future task. Safety-reviewed
+PASS. 94/94 tests pass on `feature/v0.4-llm-planner`.
+
+Next up: task 5 (fallback/timeout handling — largely already covered by
+`LlmPlanner.plan_once`'s fail-closed behavior and `PlannerScheduler`'s
+per-cycle exception isolation, so this task may mostly be about verifying/
+documenting that coverage rather than new code) or task 6 (config surface:
+model name, host/port, poll interval, default-off toggle). Tasks 5-8
+remain Codex's default lane; tasks 9 (real Ollama install + live smoke
+test) and 10 (optional UI) are Claude's/TBD lane per `AGENTS.md`'s default
+routing.
 
 **Operational note:** Codex's CLI sandbox intermittently denies git writes
 (can't reliably run `git checkout -b`/`git commit` itself, even though it
@@ -99,10 +110,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Delegate v0.4 task 4 (planner cadence/timer) to Codex: runs `LlmPlanner.plan_once`
-on its own slow interval (seconds, not frames) on a background thread, explicitly
-non-blocking toward the Tk UI thread and the per-frame vision/rule loop. Depends
-on task 3 (done, PR #20). PRs target `feature/v0.4-llm-planner`, not `main`.
+Delegate v0.4 task 5 (fallback/timeout handling) or task 6 (config surface) to
+Codex — see `docs/PLAN.md`'s checklist notes for task 5 on why it may mostly be
+verification/docs rather than new code, since `LlmPlanner.plan_once` (PR #20)
+and `PlannerScheduler` (PR #24) already fail closed and isolate exceptions.
+Depends on task 4 (done, PR #24). PRs target `feature/v0.4-llm-planner`, not
+`main`.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
