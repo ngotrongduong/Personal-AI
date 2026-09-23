@@ -1,0 +1,111 @@
+{
+  "schema_version": 1,
+  "roles": {
+    "planner": ["qwen35_9b", "qwen35_4b"],
+    "visual_reasoner": ["qwen35_9b", "qwen3vl_4b"],
+    "memory_embedding": ["qwen3_embedding_0_6b"],
+    "heavy_reasoner": ["gpt_oss_20b"],
+    "ocr_specialist": ["paddleocr_v6_small"],
+    "speech_to_text": ["whisper_cpp_small"]
+  },
+  "models": [
+    {
+      "id": "qwen35_9b",
+      "display_name": "Qwen3.5 9B Q4_K_M",
+      "provider": "ollama",
+      "provider_model": "qwen3.5:9b",
+      "roles": ["planner", "visual_reasoner"],
+      "capabilities": ["chat", "vision", "tools", "thinking"],
+      "enabled_by_default": true,
+      "download_gb": 6.6,
+      "max_context_tokens": 262144,
+      "default_context_tokens": 8192,
+      "source_repo": "QwenLM/Qwen3.8",
+      "license": "Apache-2.0",
+      "notes": "Primary local planner/multimodal generalist for the current 12GB-VRAM target. Start with an 8K runtime context rather than the model maximum to leave VRAM for the game/capture stack."
+    },
+    {
+      "id": "qwen35_4b",
+      "display_name": "Qwen3.5 4B",
+      "provider": "ollama",
+      "provider_model": "qwen3.5:4b",
+      "roles": ["planner"],
+      "capabilities": ["chat", "vision", "tools", "thinking"],
+      "enabled_by_default": true,
+      "download_gb": 3.4,
+      "max_context_tokens": 262144,
+      "default_context_tokens": 8192,
+      "source_repo": "QwenLM/Qwen3.8",
+      "license": "Apache-2.0",
+      "notes": "Faster/lighter fallback when the 9B model is unavailable or latency matters more than planning quality."
+    },
+    {
+      "id": "qwen3vl_4b",
+      "display_name": "Qwen3-VL 4B",
+      "provider": "ollama",
+      "provider_model": "qwen3-vl:4b",
+      "roles": ["visual_reasoner"],
+      "capabilities": ["chat", "vision", "tools", "thinking"],
+      "enabled_by_default": true,
+      "download_gb": 3.3,
+      "max_context_tokens": 262144,
+      "default_context_tokens": 8192,
+      "source_repo": "QwenLM/Qwen3-VL",
+      "license": "Apache-2.0",
+      "notes": "Optional lighter screenshot/UI reasoning specialist. The newer Qwen3.5-9B remains the first-choice generalist."
+    },
+    {
+      "id": "qwen3_embedding_0_6b",
+      "display_name": "Qwen3 Embedding 0.6B",
+      "provider": "ollama",
+      "provider_model": "qwen3-embedding:0.6b",
+      "roles": ["memory_embedding"],
+      "capabilities": ["embedding"],
+      "enabled_by_default": true,
+      "download_gb": 0.639,
+      "max_context_tokens": 32768,
+      "source_repo": "QwenLM/Qwen3-Embedding",
+      "license": "Apache-2.0 (model release; see docs/MODELS.md license note)",
+      "notes": "Small local embedding model for future semantic memory, session retrieval, and code/game-profile search."
+    },
+    {
+      "id": "gpt_oss_20b",
+      "display_name": "OpenAI gpt-oss 20B",
+      "provider": "ollama",
+      "provider_model": "gpt-oss:20b",
+      "roles": ["heavy_reasoner"],
+      "capabilities": ["chat", "tools", "thinking"],
+      "enabled_by_default": false,
+      "download_gb": 14.0,
+      "max_context_tokens": 131072,
+      "default_context_tokens": 4096,
+      "source_repo": "openai/gpt-oss",
+      "license": "Apache-2.0",
+      "notes": "Optional heavy reasoning model. Not a default on 12GB VRAM because the Ollama artifact is about 14GB and the official model targets roughly 16GB memory; expect CPU/RAM offload or lower speed."
+    },
+    {
+      "id": "paddleocr_v6_small",
+      "display_name": "PaddleOCR PP-OCRv6 small",
+      "provider": "paddleocr",
+      "provider_model": "PP-OCRv6-small",
+      "roles": ["ocr_specialist"],
+      "capabilities": ["ocr"],
+      "enabled_by_default": false,
+      "source_repo": "PaddlePaddle/PaddleOCR",
+      "license": "Apache-2.0",
+      "notes": "Future optional OCR backend for game UI/digital display text. Keep Tesseract as the simple baseline until this provider is implemented."
+    },
+    {
+      "id": "whisper_cpp_small",
+      "display_name": "Whisper.cpp small",
+      "provider": "whisper_cpp",
+      "provider_model": "small",
+      "roles": ["speech_to_text"],
+      "capabilities": ["speech_to_text"],
+      "enabled_by_default": false,
+      "source_repo": "ggml-org/whisper.cpp",
+      "license": "MIT",
+      "notes": "Future offline speech-to-text backend for voice commands and spoken session notes."
+    }
+  ]
+}

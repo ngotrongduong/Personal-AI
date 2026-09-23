@@ -24,3 +24,10 @@ Thumbs.db
 .env
 .env.*
 config.local.json
+
+# Local AI model artifacts / overrides
+*.gguf
+*.safetensors
+*.onnx
+models.local/
+configs/models.local.json
