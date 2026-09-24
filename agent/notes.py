@@ -133,12 +133,16 @@ class NoteBook:
             self._revision += 1
             return note
 
-    def edit(self, index: int, text: str) -> Note:
-        """Replace a note's text. The note becomes a user note."""
+    def edit(self, index: int, text: str, *, expected: Note | None = None) -> Note:
+        """Replace a note's text. The note becomes a user note.
+
+        With ``expected``, refuse unless the note at ``index`` is still that
+        note: a planner note may have shifted the list since it was shown.
+        """
 
         cleaned = clean_note(text)
         with self._lock:
-            self._check_index(index)
+            self._check_index(index, expected)
             duplicate = self._duplicate_index(cleaned)
             if duplicate is not None and duplicate != index:
                 raise NotesError("That note already exists.")
@@ -147,12 +151,20 @@ class NoteBook:
             self._revision += 1
             return note
 
-    def delete(self, index: int) -> Note:
+    def delete(self, index: int, *, expected: Note | None = None) -> Note:
         with self._lock:
-            self._check_index(index)
+            self._check_index(index, expected)
             note = self._notes.pop(index)
             self._revision += 1
             return note
+
+    def inherit_rate_limit(self, other: NoteBook) -> None:
+        """Keep ``other``'s last planner-note time, e.g. after re-reading the file."""
+
+        with other._lock:
+            last = other._last_llm_at
+        with self._lock:
+            self._last_llm_at = last
 
     # ------------------------------------------------------------------- llm
 
@@ -193,9 +205,11 @@ class NoteBook:
 
     # --------------------------------------------------------------- helpers
 
-    def _check_index(self, index: int) -> None:
+    def _check_index(self, index: int, expected: Note | None = None) -> None:
         if not isinstance(index, int) or isinstance(index, bool) or not 0 <= index < len(self._notes):
             raise NotesError(f"No note at position {index!r}.")
+        if expected is not None and self._notes[index] != expected:
+            raise NotesError("The notes changed meanwhile; select the note again.")
 
     def _duplicate_index(self, cleaned: str) -> int | None:
         key = cleaned.casefold()
@@ -221,7 +235,7 @@ def load_notes(
         return NoteBook(clock=clock, wall=wall)
     try:
         data = json.loads(path.read_text(encoding="utf-8"))
-    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError, RecursionError) as error:
         raise NotesError(f"Could not read {path}: {error}") from error
 
     if not isinstance(data, dict):
@@ -249,7 +263,7 @@ def load_notes(
             raise NotesError(f"{label}: {error}") from error
         if text != item["text"]:
             raise NotesError(f"{label}: text has control characters or surrounding spaces.")
-        if item["source"] not in NOTE_SOURCES:
+        if not isinstance(item["source"], str) or item["source"] not in NOTE_SOURCES:
             raise NotesError(f"{label}: source must be 'user' or 'llm'.")
         if not isinstance(item["updated"], str) or len(item["updated"]) > 64:
             raise NotesError(f"{label}: updated must be a short string.")

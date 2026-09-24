@@ -80,6 +80,19 @@ class NoteBookTests(unittest.TestCase):
         edited = self.book.edit(0, "planner fact, checked by me")
         self.assertEqual(edited.source, "user")
 
+    def test_expected_note_guards_against_a_shifted_list(self) -> None:
+        for index in range(MAX_LLM_NOTES):
+            self.add_llm(f"planner fact {index}")
+        shown = self.book.notes()
+        # The oldest planner note is replaced: every index shifts by one.
+        self.assertEqual(self.add_llm("newest").action, "replaced")
+        with self.assertRaises(NotesError):
+            self.book.edit(1, "edited", expected=shown[1])
+        with self.assertRaises(NotesError):
+            self.book.delete(1, expected=shown[1])
+        current = self.book.notes()
+        self.assertEqual(self.book.delete(0, expected=current[0]), shown[1])
+
     def test_llm_note_added_and_rate_limited(self) -> None:
         result = self.book.add_llm("type_x works only when focused")
         self.assertEqual(result.action, "added")
@@ -226,6 +239,27 @@ class NotesFileTests(unittest.TestCase):
         self.path.write_text("{not json", encoding="utf-8")
         with self.assertRaises(NotesError):
             load_notes(self.path)
+
+    def test_hostile_files_raise_only_notes_error(self) -> None:
+        good = {"text": "t", "source": "user", "updated": "2026-09-25T10:00:00"}
+        for source in ([], {}, None, 1):
+            with self.subTest(source=source):
+                self.write({"format_version": 1, "notes": [{**good, "source": source}]})
+                with self.assertRaises(NotesError):
+                    load_notes(self.path)
+        self.path.write_text('{"notes": ' + "[" * 100_000, encoding="utf-8")
+        with self.assertRaises(NotesError):
+            load_notes(self.path)
+
+    def test_inherit_rate_limit(self) -> None:
+        clock = FakeClock()
+        old = NoteBook(clock=clock, wall=wall)
+        self.assertTrue(old.add_llm("first").stored)
+        new = NoteBook(clock=clock, wall=wall)
+        new.inherit_rate_limit(old)
+        self.assertFalse(new.add_llm("second").stored)
+        clock.now += LLM_NOTE_INTERVAL_SECONDS
+        self.assertTrue(new.add_llm("second").stored)
 
     def test_save_failure_raises_notes_error(self) -> None:
         blocker = Path(self._tmp.name) / "blocker"

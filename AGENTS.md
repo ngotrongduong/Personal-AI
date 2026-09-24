@@ -113,6 +113,10 @@ Memory invariant (permanent, from v0.8):
 - The memory modules never import the input path.
 - The LLM's `remember` directive is text only (1–200 chars), it is off unless
   the profile sets `planner.llm_notes`, and it never edits or deletes a note.
+  The Memory panel's "Let the planner write notes" checkbox is an unsaved
+  edit of that field: it needs a loaded profile and a valid `notes.json`.
+- A `notes.json` that is invalid, or changed outside the app, is never
+  overwritten; the notes turn read-only until the profile is loaded again.
 - Notes are bounded:
   - at most 20 notes, of which at most 10 come from the LLM;
   - at most one LLM note per 30 s.

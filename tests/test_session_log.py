@@ -11,6 +11,7 @@ from agent.session_log import (
     EVENT_TYPES,
     MAX_TEXT_CHARS,
     SessionLogWriter,
+    inspect_session,
     read_session,
     record_problems,
     validate_session,
@@ -231,6 +232,16 @@ class ReaderTests(unittest.TestCase):
 
     def test_record_problems_on_valid_record(self) -> None:
         self.assertEqual(record_problems(self.rec("truncated", limit_bytes=10)), [])
+
+    def test_hostile_lines_never_raise(self) -> None:
+        start = self.rec("session_start", **START)
+        self.write_lines(start, {**self.rec("cycle"), "type": []}, {"type": {}})
+        with self.path.open("a", encoding="utf-8") as handle:
+            handle.write("[" * 100_000 + "\n")
+        records, problems = inspect_session(self.path)
+        self.assertEqual(len(records), 3)
+        self.assertTrue(any("unknown record type []" in p for p in problems), problems)
+        self.assertTrue(any("nested too deeply" in p for p in problems), problems)
 
 
 if __name__ == "__main__":

@@ -99,7 +99,7 @@ def record_problems(record: object) -> list[str]:
     if not isinstance(record, dict):
         return ["record is not a JSON object"]
     event_type = record.get("type")
-    if event_type not in EVENT_FIELDS:
+    if not isinstance(event_type, str) or event_type not in EVENT_FIELDS:
         return [f"unknown record type {event_type!r}"]
     problems: list[str] = []
     if record.get("v") != LOG_VERSION or isinstance(record.get("v"), bool):
@@ -226,6 +226,12 @@ def validate_session(path: str | Path) -> list[str]:
     return _read(Path(path))[1]
 
 
+def inspect_session(path: str | Path) -> tuple[list[dict[str, object]], list[str]]:
+    """The records that decode plus every problem found; never raises."""
+
+    return _read(Path(path))
+
+
 def _read(path: Path) -> tuple[list[dict[str, object]], list[str]]:
     try:
         raw_lines = path.read_text(encoding="utf-8").splitlines()
@@ -242,6 +248,9 @@ def _read(path: Path) -> tuple[list[dict[str, object]], list[str]]:
             record = json.loads(line)
         except json.JSONDecodeError as error:
             problems.append(f"line {number}: invalid JSON ({error.msg})")
+            continue
+        except RecursionError:
+            problems.append(f"line {number}: invalid JSON (nested too deeply)")
             continue
         problems.extend(f"line {number}: {problem}" for problem in record_problems(record))
         if isinstance(record, dict):

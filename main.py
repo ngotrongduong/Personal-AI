@@ -29,6 +29,17 @@ from agent.autopilot import (
 )
 from agent.game_state import GameState
 from agent.llm_planner import MAX_GOAL_LENGTH, SkillBookCatalog
+from agent.memory_store import check_slug, new_session_path, notes_path
+from agent.notes import (
+    MAX_LLM_NOTES,
+    MAX_NOTES,
+    Note,
+    NoteBook,
+    NoteResult,
+    NotesError,
+    load_notes,
+    save_notes,
+)
 from agent.ollama_client import OllamaClientConfig
 from agent.planner_config import PlannerConfig
 from agent.planner_controller import PlannerController
@@ -46,6 +57,7 @@ from agent.profile import (
     save_profile,
 )
 from agent.rule_engine import SKILL_RULE_ACTION, ActionIntent, RuleEngine, VisibilityRule
+from agent.session_log import SessionLogWriter
 from agent.skill_executor import SkillExecutor
 from agent.skills import ClickSkill, HoldSkill, PressSkill, Skill, SkillBook, SkillPermissions
 from agent.step_history import Decision, StepHistory, StepRecord
@@ -75,6 +87,12 @@ PLANNER_NO_PROPOSAL_TEXT = "Proposal: none."
 PLANNER_APPROVE_MODE_TEXT = "Mode: approve each step."
 # Executor source of planner steps; their results feed the autopilot and history.
 PLANNER_SOURCE = "planner"
+
+MEMORY_NO_SESSION_TEXT = "Session log: none yet (a session starts with the planner)."
+SESSION_END_PLANNER_OFF = "planner disabled"
+SESSION_END_RESTART = "planner restarted"
+SESSION_END_F8 = "emergency stop"
+SESSION_END_APP_CLOSE = "app closed"
 
 RECORDING_IDLE_TEXT = "Recording: off."
 RECORDING_STOP_F8 = "f8"
@@ -257,6 +275,22 @@ class _PlannerLogHandler(logging.Handler):
             self._app._planner_queue.put(("log", 0, message))
 
 
+def default_memory_root() -> Path:
+    """The folder that holds ``memory/``. Tests point it at a temporary folder."""
+
+    return Path(__file__).resolve().parent
+
+
+def _file_stamp(path: Path) -> tuple[int, int] | None:
+    """(modified time, size) of a file; None when it is missing or unreadable."""
+
+    try:
+        info = path.stat()
+    except OSError:
+        return None
+    return info.st_mtime_ns, info.st_size
+
+
 class PersonalGameAIApp:
     def __init__(self, root: tk.Tk):
         self.root = root
@@ -384,6 +418,36 @@ class PersonalGameAIApp:
         self.planner_mode_status_var = tk.StringVar(value=PLANNER_APPROVE_MODE_TEXT)
         self.planner_proposal_var = tk.StringVar(value=PLANNER_NO_PROPOSAL_TEXT)
 
+        # v0.8 session memory. Notes and session logs are read and written on
+        # the Tk thread only. The planner thread reaches the notebook through
+        # the controller's note sink (add_llm only) and reports each result
+        # through _planner_queue. Nothing on the input path reads memory.
+        self.memory_root = default_memory_root()
+        self.notebook = NoteBook()
+        self._notes_slug = check_slug(None)
+        # None while notes.json is invalid: the notes are then read-only and
+        # the file is never overwritten.
+        self._notes_path: Path | None = None
+        self._notes_error: str | None = None
+        self._notes_saved_revision = 0
+        # The last save failure, shown in the Memory status until a save works.
+        self._notes_save_error: str | None = None
+        # What the Memory list shows; edits check the note is still there.
+        self._notes_shown: tuple[Note, ...] = ()
+        self._notes_shown_revision = -1
+        # One notebook per profile slug for the app's lifetime, so reloading a
+        # profile keeps the planner's note rate limit.
+        self._notebooks: dict[str, NoteBook] = {}
+        # notes.json as last read or written per slug, to spot edits made
+        # outside the app: those are re-read, never overwritten.
+        self._notes_stamps: dict[str, tuple[int, int] | None] = {}
+        self.session_log: SessionLogWriter | None = None
+        self._session_truncated_reported = False
+        self.memory_note_var = tk.StringVar(value="")
+        self.memory_llm_notes_var = tk.BooleanVar(value=False)
+        self.memory_status_var = tk.StringVar(value="")
+        self.memory_session_var = tk.StringVar(value=MEMORY_NO_SESSION_TEXT)
+
         self.record_fps_var = tk.StringVar(value=f"{RECORDING_DEFAULT_FPS:g}")
         self.recording_status_var = tk.StringVar(value=RECORDING_IDLE_TEXT)
         # Tk-thread view of the recorder: "idle", "starting", "recording" or
@@ -398,6 +462,7 @@ class PersonalGameAIApp:
         )
 
         self._build_ui()
+        self._switch_notebook(None)
         self.refresh_profiles()
         self._planner_logger = logging.getLogger("agent.planner_scheduler")
         self._planner_logger.setLevel(logging.INFO)
@@ -666,6 +731,58 @@ class PersonalGameAIApp:
             planner_box, textvariable=self.planner_last_cycle_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
+        memory_box = ttk.LabelFrame(
+            outer,
+            text="Memory — notes shown to the planner as hints; they never change skills or keys",
+        )
+        memory_box.pack(fill="x", pady=(0, 8))
+
+        notes_row = ttk.Frame(memory_box)
+        notes_row.pack(fill="x", padx=8, pady=(7, 4))
+        self.memory_listbox = tk.Listbox(
+            notes_row, height=3, exportselection=False, activestyle="none"
+        )
+        self.memory_listbox.pack(side="left", fill="x", expand=True)
+        notes_scroll = ttk.Scrollbar(
+            notes_row, orient="vertical", command=self.memory_listbox.yview
+        )
+        notes_scroll.pack(side="left", fill="y")
+        self.memory_listbox.configure(yscrollcommand=notes_scroll.set)
+        self.memory_listbox.bind("<<ListboxSelect>>", self._memory_note_selected)
+
+        note_row = ttk.Frame(memory_box)
+        note_row.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Label(note_row, text="Note:").pack(side="left")
+        ttk.Entry(
+            note_row, textvariable=self.memory_note_var, width=70
+        ).pack(side="left", padx=(4, 0), fill="x", expand=True)
+        self.memory_add_button = ttk.Button(
+            note_row, text="Add", command=self.add_memory_note
+        )
+        self.memory_add_button.pack(side="left", padx=(8, 0))
+        self.memory_edit_button = ttk.Button(
+            note_row, text="Save Edit", command=self.edit_memory_note
+        )
+        self.memory_edit_button.pack(side="left", padx=(4, 0))
+        self.memory_delete_button = ttk.Button(
+            note_row, text="Delete", command=self.delete_memory_note
+        )
+        self.memory_delete_button.pack(side="left", padx=(4, 0))
+        self.memory_llm_notes_check = ttk.Checkbutton(
+            note_row,
+            text="Let the planner write notes",
+            variable=self.memory_llm_notes_var,
+            command=self._toggle_llm_notes,
+        )
+        self.memory_llm_notes_check.pack(side="left", padx=(15, 0))
+
+        ttk.Label(
+            memory_box, textvariable=self.memory_status_var
+        ).pack(anchor="w", padx=8, pady=(0, 2))
+        ttk.Label(
+            memory_box, textvariable=self.memory_session_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+
         recording_box = ttk.LabelFrame(
             outer,
             text="Recording — your own demonstrations (off while input control is enabled)",
@@ -898,6 +1015,10 @@ class PersonalGameAIApp:
         self.planner.stop()
         self._reset_planner_steps("of the emergency stop")
         self._reset_planner_last_cycle()
+        # The log ends after everything that stops input, before recording.
+        self._close_session_log(
+            SESSION_END_APP_CLOSE if recording_reason == RECORDING_STOP_APP_CLOSE else SESSION_END_F8
+        )
         self.planner_enabled_var.set(False)
         self.planner_status_var.set("Planner: disabled by emergency stop.")
         if planner_was_running:
@@ -1151,6 +1272,7 @@ class PersonalGameAIApp:
         self.planner.stop()
         self._reset_planner_steps(why)
         self._reset_planner_last_cycle()
+        self._close_session_log(why)
         self.planner_enabled_var.set(False)
         self.planner_status_var.set(f"Planner: disabled because {why}.")
         if planner_was_running:
@@ -1205,6 +1327,7 @@ class PersonalGameAIApp:
                 kept[detector.name] = (spec, templates[detector.name])
             skill_book = profile.skill_book()
             rule_engine = profile.rule_engine()
+            slug = check_slug(profile_slug(profile.name))
         except (ProfileError, ValueError, RuntimeError, cv2.error) as exc:
             self.log(f"Profile '{folder_name}' not loaded: {exc}")
             messagebox.showerror("Load Profile", str(exc))
@@ -1223,6 +1346,8 @@ class PersonalGameAIApp:
         self.step_history.clear()
         self.planner_goal_var.set(profile.planner.goal)
         self.planner_auto_steps_var.set(str(profile.planner.auto_max_steps))
+        self.memory_llm_notes_var.set(profile.planner.llm_notes)
+        self._switch_notebook(slug)
 
         if profile.detectors:
             self.detectors_var.set(
@@ -1463,6 +1588,7 @@ class PersonalGameAIApp:
             self.planner.stop()
             self._reset_planner_steps("the planner was disabled")
             self._reset_planner_last_cycle()
+            self._close_session_log(SESSION_END_PLANNER_OFF)
             self.planner_status_var.set("Planner: disabled.")
             self.log("LLM planner DISABLED.")
             return
@@ -1480,6 +1606,8 @@ class PersonalGameAIApp:
             self._reset_planner_last_cycle()
             generation = self._planner_generation
             book = self.skill_book
+            # Read-only notes (an invalid notes.json) are never written to.
+            allow_notes = bool(self.memory_llm_notes_var.get()) and self._notes_path is not None
             self.planner.start(
                 self.rule_engine,
                 config,
@@ -1490,6 +1618,9 @@ class PersonalGameAIApp:
                 goal=lambda: self._planner_goal,
                 mailbox=self.proposals,
                 should_plan=self._planner_may_plan,
+                notes=self.notebook,
+                allow_notes=allow_notes,
+                on_note=lambda result: self._queue_planner_note(generation, result),
             )
         except ValueError as exc:
             self.planner_enabled_var.set(False)
@@ -1500,6 +1631,7 @@ class PersonalGameAIApp:
         self.planner_status_var.set(
             f"Planner: enabled ({config.ollama.model}, every {config.interval_seconds:g}s)."
         )
+        self._open_session_log(config.ollama.model, allow_notes)
         if book is None:
             scope = "No profile is loaded, so it can only enable or disable existing rules."
         else:
@@ -1519,6 +1651,11 @@ class PersonalGameAIApp:
         if not self._closing:
             self._planner_queue.put(("cycle", generation, report))
 
+    def _queue_planner_note(self, generation: int, result: NoteResult):
+        """Called on the planner thread; only queues the result for _poll_preview."""
+        if not self._closing:
+            self._planner_queue.put(("note", generation, result))
+
     def _drain_planner_queue(self):
         while True:
             try:
@@ -1527,8 +1664,29 @@ class PersonalGameAIApp:
                 return
             if kind == "log":
                 self.log(f"Planner: {payload}")
+            elif kind == "note" and isinstance(payload, NoteResult):
+                self._show_planner_note(generation, payload)
             elif isinstance(payload, PlannerCycleReport):
                 self._show_planner_cycle_report(generation, payload)
+                if generation == self._planner_generation and not self._closing:
+                    self._session_write(
+                        "cycle",
+                        status=payload.status,
+                        message=payload.message,
+                        latency_s=round(payload.duration_seconds, 3),
+                    )
+
+    def _show_planner_note(self, generation: int, result: NoteResult):
+        # The note is already in (or kept out of) the notebook; this only
+        # reports it. _sync_notes saves it and refreshes the list.
+        self.log(f"Planner {result.message}")
+        if generation == self._planner_generation:
+            self._session_write(
+                "note",
+                action="add" if result.stored else "skip",
+                source="llm",
+                text=result.text if result.stored else f"{result.text} ({result.reason})".strip(),
+            )
 
     # ---------------- Planner steps (v0.7) ----------------
 
@@ -1559,6 +1717,7 @@ class PersonalGameAIApp:
             base,
             goal=self.planner_goal_var.get().strip(),
             auto_max_steps=self._parse_auto_max_steps(),
+            llm_notes=bool(self.memory_llm_notes_var.get()),
         )
 
     def _set_planner_mode(self):
@@ -1617,6 +1776,7 @@ class PersonalGameAIApp:
             return
         self.autopilot.arm_auto(max_steps)
         self._auto_hwnd = target
+        self._session_write("auto", on=True, reason="confirmed by the user", max_steps=max_steps)
         self.log(
             f"Auto mode ON: up to {max_steps} planner steps without approval. "
             "Press F8 to stop everything."
@@ -1643,6 +1803,7 @@ class PersonalGameAIApp:
         self.planner_mode_var.set("approve")
         if reason is not None:
             self.log(f"Auto mode OFF because {reason}.")
+            self._session_write("auto", on=False, reason=reason, max_steps=None)
         self._refresh_planner_panel()
 
     def _reset_planner_steps(self, why: str):
@@ -1789,6 +1950,7 @@ class PersonalGameAIApp:
         if auto_off is not None:
             self._auto_hwnd = None
             self.planner_mode_var.set("approve")
+            self._session_write("auto", on=False, reason=auto_off, max_steps=None)
             self.log(f"Auto mode OFF: {auto_off}.")
             self._refresh_planner_panel()
 
@@ -1801,6 +1963,14 @@ class PersonalGameAIApp:
         )
         self._planner_decision = None
         self.proposals.release()
+        self._session_write(
+            "step",
+            skill=proposal.skill_name,
+            reason=proposal.reason,
+            decision=decision,
+            outcome=outcome,
+            ok=ok,
+        )
         self._refresh_planner_panel()
 
     def _refresh_planner_panel(self, now: float | None = None):
@@ -1853,6 +2023,252 @@ class PersonalGameAIApp:
             duration = f"{report.duration_seconds:.1f}s"
         self.planner_last_cycle_var.set(
             f"Last cycle: {finished} · {duration} · {report.status} · {message}"
+        )
+
+    # ---------------- Memory (v0.8) ----------------
+
+    def _switch_notebook(self, slug: str | None):
+        """Show the notes of profile ``slug`` (None: no profile). Tk thread only; never raises."""
+        self._save_notes_if_changed()
+        key = check_slug(slug)
+        path = notes_path(self.memory_root, key)
+        cached = self._notebooks.get(key)
+        stamp = _file_stamp(path)
+        error = None
+        if cached is not None and stamp == self._notes_stamps.get(key):
+            book = cached
+        else:
+            try:
+                book = load_notes(path)
+            except Exception as exc:  # a broken file must never stop the app
+                book, error = NoteBook(), str(exc)
+                self._notebooks.pop(key, None)
+            else:
+                if cached is not None:
+                    self.log(f"memory/{key}/notes.json changed outside the app; reloaded it.")
+                self._notebooks[key] = book
+                self._notes_stamps[key] = stamp
+            if cached is not None:
+                # The file wins, but the planner's rate limit carries over.
+                book.inherit_rate_limit(cached)
+        self.notebook = book
+        self._notes_slug = key
+        self._notes_path = None if error else path
+        self._notes_error = error
+        self._notes_save_error = None
+        self._notes_saved_revision = book.revision
+        if error:
+            self.log(f"Notes are read-only until notes.json is fixed or moved: {error}")
+        self._refresh_memory_panel(force=True)
+
+    def _save_notes_if_changed(self):
+        path = self._notes_path
+        if path is None:
+            return
+        revision = self.notebook.revision
+        if revision == self._notes_saved_revision:
+            return
+        # One attempt (and at most one report) per change, never a retry loop.
+        self._notes_saved_revision = revision
+        if _file_stamp(path) != self._notes_stamps.get(self._notes_slug):
+            # Edited or broken by hand while the app ran: never overwrite it.
+            self._notes_path = None
+            self._notes_error = "notes.json changed outside the app"
+            self.log(
+                f"Notes not saved: memory/{self._notes_slug}/notes.json changed outside the app. "
+                "Load the profile again to use the file; the change made here is dropped."
+            )
+            self._refresh_memory_panel(force=True)
+            return
+        try:
+            save_notes(path, self.notebook)
+        except NotesError as exc:
+            self._notes_save_error = str(exc)
+            self.log(f"Notes not saved: {exc}")
+        else:
+            self._notes_save_error = None
+            self._notes_stamps[self._notes_slug] = _file_stamp(path)
+        self._refresh_memory_panel(force=True)
+
+    def _sync_notes(self):
+        """Tk loop: save notes the planner added and show them."""
+        self._save_notes_if_changed()
+        self._refresh_memory_panel()
+
+    def _refresh_memory_panel(self, *, force: bool = False):
+        revision = self.notebook.revision
+        if not force and revision == self._notes_shown_revision:
+            return
+        selected = self._selected_note()
+        notes = self.notebook.notes()
+        self._notes_shown_revision = revision
+        self._notes_shown = notes
+        self.memory_listbox.delete(0, "end")
+        for note in notes:
+            self.memory_listbox.insert("end", f"[{note.source}] {note.text}")
+        if selected is not None and selected[1] in notes:
+            # A planner note may shift the list; keep the user's note selected.
+            self.memory_listbox.selection_set(notes.index(selected[1]))
+        where = f"memory/{self._notes_slug}/notes.json"
+        if self._notes_error is not None:
+            status = f"Notes: READ-ONLY — {where}: fix or move it, then load the profile (see the log)."
+        else:
+            from_llm = sum(note.source == "llm" for note in notes)
+            status = (
+                f"Notes: {len(notes)}/{MAX_NOTES} ({from_llm}/{MAX_LLM_NOTES} from the planner) · "
+                f"{where}"
+            )
+            if self._notes_save_error is not None:
+                status += " · NOT SAVED (see the log)"
+        self.memory_status_var.set(status)
+        read_only = self._notes_error is not None
+        for widget in (self.memory_add_button, self.memory_edit_button, self.memory_delete_button):
+            widget.state(["disabled"] if read_only else ["!disabled"])
+        # Planner notes follow a profile's planner.llm_notes: no profile, no planner notes.
+        if self.profile is None:
+            self.memory_llm_notes_var.set(False)
+        no_llm_notes = read_only or self.profile is None
+        self.memory_llm_notes_check.state(["disabled"] if no_llm_notes else ["!disabled"])
+
+    def _memory_note_selected(self, _event=None):
+        selected = self._selected_note()
+        if selected is not None:
+            self.memory_note_var.set(selected[1].text)
+
+    def _selected_note(self) -> tuple[int, Note] | None:
+        selection = self.memory_listbox.curselection()
+        if not selection or selection[0] >= len(self._notes_shown):
+            return None
+        return selection[0], self._notes_shown[selection[0]]
+
+    def add_memory_note(self):
+        if self._notes_path is None:
+            return
+        try:
+            note = self.notebook.add_user(self.memory_note_var.get())
+        except NotesError as exc:
+            messagebox.showwarning("Memory", str(exc))
+            return
+        self._user_note_changed("add", note.text)
+
+    def edit_memory_note(self):
+        selected = self._selected_note()
+        if self._notes_path is None:
+            messagebox.showwarning("Memory", "The notes are read-only (see the Memory status).")
+            return
+        if selected is None:
+            messagebox.showwarning("Memory", "Select a note to edit first.")
+            return
+        index, shown = selected
+        try:
+            note = self.notebook.edit(index, self.memory_note_var.get(), expected=shown)
+        except NotesError as exc:
+            messagebox.showwarning("Memory", str(exc))
+            self._refresh_memory_panel()
+            return
+        self._user_note_changed("edit", note.text)
+
+    def delete_memory_note(self):
+        selected = self._selected_note()
+        if self._notes_path is None:
+            messagebox.showwarning("Memory", "The notes are read-only (see the Memory status).")
+            return
+        if selected is None:
+            messagebox.showwarning("Memory", "Select a note to delete first.")
+            return
+        index, shown = selected
+        try:
+            note = self.notebook.delete(index, expected=shown)
+        except NotesError as exc:
+            messagebox.showwarning("Memory", str(exc))
+            self._refresh_memory_panel()
+            return
+        self._user_note_changed("delete", note.text)
+
+    def _user_note_changed(self, action: str, text: str):
+        self.memory_note_var.set("")
+        self._save_notes_if_changed()
+        self._refresh_memory_panel()
+        self._session_write("note", action=action, source="user", text=text)
+        past = {"add": "added", "edit": "edited", "delete": "deleted"}[action]
+        self.log(f"Note {past}: {text}")
+
+    def _toggle_llm_notes(self):
+        state = "ON" if self.memory_llm_notes_var.get() else "OFF"
+        when = " (from the next planner start)" if self.planner.is_running else ""
+        self.log(
+            f"Planner notes {state}{when}. Save Profile keeps the choice. "
+            "Notes are hints only; they never change skills or keys."
+        )
+
+    def _memory_display(self, path: Path) -> str:
+        try:
+            return path.relative_to(self.memory_root).as_posix()
+        except ValueError:
+            return str(path)
+
+    def _open_session_log(self, model: str, llm_notes: bool):
+        """Start this planner session's log file; a failure only turns logging off."""
+        self._close_session_log(SESSION_END_RESTART)
+        try:
+            path = new_session_path(self.memory_root, self._notes_slug)
+        except (OSError, ValueError) as exc:
+            self.memory_session_var.set("Session log: off (could not create the file; see the log).")
+            self.log(f"Session log off: could not create a session file: {exc}")
+            return
+        self.session_log = SessionLogWriter(path)
+        self._session_truncated_reported = False
+        self.memory_session_var.set(f"Session log: {self._memory_display(path)}")
+        try:
+            auto_max_steps = self._parse_auto_max_steps()
+        except ValueError:
+            auto_max_steps = DEFAULT_AUTO_MAX_STEPS
+        self._session_write(
+            "session_start",
+            app_version=APP_VERSION,
+            profile=self.profile.name if self.profile is not None else None,
+            model=model,
+            goal=self._planner_goal,
+            auto_max_steps=auto_max_steps,
+            llm_notes=llm_notes,
+        )
+
+    def _session_write(self, event_type: str, **fields: object):
+        """Append one record to the session log. Never raises; a failure turns it off."""
+        log = self.session_log
+        if log is None:
+            return
+        try:
+            log.write(event_type, **fields)
+        except Exception as exc:  # logging must never break the caller
+            error: str | None = f"invalid {event_type} record: {exc}"
+        else:
+            error = log.error
+        if error is not None:
+            self.session_log = None
+            self.memory_session_var.set("Session log: OFF after an error (see the log).")
+            self.log(f"Session log turned off for the rest of this session: {error}")
+        elif log.truncated and not self._session_truncated_reported:
+            self._session_truncated_reported = True
+            self.memory_session_var.set(
+                f"Session log: full; the rest of this session is not logged · "
+                f"{self._memory_display(log.path)}"
+            )
+            self.log("Session log is full; the rest of this session is not logged.")
+
+    def _close_session_log(self, reason: str):
+        log = self.session_log
+        if log is None:
+            return
+        self.session_log = None
+        try:
+            log.close(reason)
+        except Exception as exc:  # logging must never break the caller
+            self.log(f"Session log error: {exc}")
+        if log.failed:
+            self.log(f"Session log error: {log.error}")
+        self.memory_session_var.set(
+            f"Session log: ended ({reason}) · {self._memory_display(log.path)}"
         )
 
     def save_snapshot(self):
@@ -2067,6 +2483,7 @@ class PersonalGameAIApp:
         self._sync_recording_state()
         self._drain_skill_runs()
         self._drain_planner_queue()
+        self._sync_notes()
         self._poll_planner_proposals()
 
         if self.capture:
@@ -2151,6 +2568,7 @@ class PersonalGameAIApp:
         self._closing = True
         try:
             self.emergency_stop(recording_reason=RECORDING_STOP_APP_CLOSE)
+            self._save_notes_if_changed()
             # Input is off; refuse new skills and wait briefly for a running one.
             self.executor.shutdown()
             self.stop_capture(silent=True)
