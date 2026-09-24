@@ -11,22 +11,55 @@ file and `docs/PLAN.md` in the same push as the work.
 
 1. Read `AGENTS.md`, this file, and `docs/PLAN.md`.
 2. `git fetch --all` and check open branches/PRs before starting anything.
-3. Run `scripts/test.ps1` locally before trusting any check; CI is blocked by
-   GitHub account billing/spending-limit state.
+3. Check the GitHub Actions CI result on the PR (Windows runner: compile,
+   ruff, pytest). Also run `scripts/test.ps1` locally for anything touching
+   live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
 ## Right now (2026-09-24)
 
+**v0.5.0 ("Demonstration recording", Issue #41) is released.** The release
+close-out (task R) bumped `APP_VERSION` and the script banners to 0.5.0 and
+updated `CHANGELOG.md`, `README.md`, `docs/ROADMAP.md` and
+`docs/ARCHITECTURE.md`. `feature/v0.5-demo-recording` was then merged into
+`main` via PR #43 as a merge commit, which closes Issue #41. **No milestone
+after v0.5 has been chosen yet**; see `docs/ROADMAP.md` ("Next — to be
+decided"). Ask the user before starting one.
+
+### v0.5 history (for reference)
+
+Integration branch: `feature/v0.5-demo-recording` (branched from `main` at the v0.4.0
+release). Task 0 (kickoff: issue, branch, `docs/PLAN.md`, `AGENTS.md`,
+`recordings/` gitignored, draft PR feature→`main`) is done. Tasks 1-3
+(`recording/schema.py`, `recording/session_writer.py`,
+`recording/input_recorder.py`) were implemented by Claude and merged via
+PR #44 because Codex hit its usage limit (reset 2026-09-25 13:55). Task 4
+(`recording/recorder_controller.py`, `RecordingController`) was also done by
+Claude and merged via PR #45. Task 5 (the `main.py` "Recording" panel) was done
+by Claude and merged via PR #46. Task 6 (`recording/dataset.py`,
+`recording/review.py`, `scripts/recordings.py`: `list` / `validate` / `export` /
+`review`) was done by Claude and merged via PR #47 (safety-reviewed PASS WITH
+NOTES, all fixed). 267 tests pass, plus 1 skipped symlink test that needs
+Windows Developer Mode. Task 7 was a live Windows smoke test on Notepad at 150%
+scale and passed. Enabling input control stopped recording and F8 stopped it;
+focus lost/gained was logged; 0 frames were dropped at 10 fps; injected input
+was dropped; `validate`/`export`/`review` worked on the real sessions. Details
+are in `docs/PLAN.md` row 7. See `docs/PLAN.md` for the design
+constraint (recording only listens, never sends input, is mutually exclusive
+with autonomous input control, and records input only while the game window is
+foreground).
+
 **v0.4.0 ("Local AI Planner", Issue #15) is released: merged into `main`**
 via PR #16 (merge commit `5b24233`). Issue #15 is closed, and
 `feature/v0.4-llm-planner` plus its sub-branches were deleted. `main` has
-`APP_VERSION = "0.4.0"`; 146/146 tests pass, ruff clean. No milestone is in
-progress yet; see "Next task" below.
+`APP_VERSION = "0.4.0"`; 146/146 tests pass, ruff clean.
 
 v0.3 ("Game State + Rules", Issue #1) was merged into `main` earlier (PR #2,
 merge commit `ef3ad40`). Issue #1 is closed.
 
-The v0.4 history below is kept for reference. **v0.4 was built** on
+### v0.4 history (for reference)
+
+**v0.4 was built** on
 `feature/v0.4-llm-planner`. Backend decision: **Ollama** (user confirmed,
 2026-09-23) — headless REST API, no GUI dependency, fits local scripted
 verification. See `docs/PLAN.md` for the full checklist/design constraint
@@ -231,34 +264,45 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Scope v0.5 (demonstration recording: record screen state plus the user's
-actions to build datasets, per `docs/ROADMAP.md`). Create a new issue, a
-`feature/v0.5-...` integration branch with a draft PR into `main`, and a fresh
-`docs/PLAN.md`. The v0.4 checklist stays in git history. Ollama and
-`qwen3.5:9b` are installed locally.
+None is scheduled. v0.5.0 is released, and the next milestone is still to be
+decided with the user. The candidates are offline imitation-learning
+experiments on recorded datasets, or the v1.0 agent loop (`docs/ROADMAP.md`).
+Never commit a recording (the repo is public).
+
+Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set
+implicitly by importing `dxcam`. Calling `SetProcessDpiAwareness(2)` explicitly
+at startup would make this robust.
+
+Ollama and `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
 - an optional directive `reason` field;
-- a cancelled worker can linger on HTTP after a fast disable/re-enable.
+- a cancelled worker can linger on HTTP after a fast disable/re-enable;
+- the planner's `_schedule_planner_cycle_report` and `_PlannerLogHandler` call
+  `root.after` from the scheduler thread, which can block that thread while the
+  Tk thread is busy or closing; the Recording panel (v0.5 task 5) uses a
+  `SimpleQueue` drained by `_poll_preview` instead, and the planner could too.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
-### Known blocker
+### CI status
 
-GitHub Actions cannot start because of the repo owner's current account
-billing/spending-limit state. This is unrelated to repository code. Until billing
-is restored, the merge gate is local verification:
+Resolved 2026-09-24: the repository is now **public**, so GitHub Actions runs
+again (it had been blocked by the owner's account billing/spending-limit
+state). `.github/workflows/ci.yml` runs compile + ruff + pytest on
+`windows-latest` / Python 3.14 for pushes and PRs on `main` and `feature/**`;
+runs #106-#110 (main, the v0.5 branch, PRs #42/#43) all passed.
 
-- compile check
-- Ruff
-- pytest
-- Windows smoke test when the task touches live GUI/capture/input behavior
-
-Record that local verification explicitly in each PR.
+Merge gate: green CI on the PR, plus a Windows smoke test when the task
+touches live GUI/capture/input behavior (CI has no real desktop/game window).
+Because the repo is public, never commit recordings, screenshots, templates,
+logs, secrets, or other user data (`.gitignore` covers `recordings/`,
+`snapshots/`, `templates/`, `logs/`).
 
 ### Open issue
 
-None. Issue #15 (v0.4), Issue #1 (v0.3) and Issue #4 are all completed/closed.
+None. Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3) and Issue #4 are all
+completed and closed.
 
 ## Lessons
 

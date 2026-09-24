@@ -7,8 +7,13 @@ venv/
 # Runtime captures / user-generated vision data
 snapshots/*
 templates/*
+recordings/*
 !snapshots/.gitkeep
 !templates/.gitkeep
+!recordings/.gitkeep
+# Datasets exported outside recordings/ (scripts/recordings.py export --out)
+dataset*.jsonl
+*.jsonl.tmp
 
 # Logs
 logs/

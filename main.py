@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import logging
 import math
+import queue
 import threading
 import time
 from pathlib import Path
@@ -25,14 +26,68 @@ from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
 from core.window_utils import list_visible_windows, client_region, focus_window
+from recording.recorder_controller import (
+    DEFAULT_FPS as RECORDING_DEFAULT_FPS,
+    MAX_FPS as RECORDING_MAX_FPS,
+    MIN_FPS as RECORDING_MIN_FPS,
+    STOP_USER as RECORDING_STOP_USER,
+    RecordingController,
+    RecordingRefusedError,
+    RecordingStatus,
+    validate_fps,
+)
 from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "0.4.0"
+APP_VERSION = "0.5.0"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
 PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
 PLANNER_MESSAGE_MAX_CHARS = 100
+
+RECORDING_IDLE_TEXT = "Recording: off."
+RECORDING_STOP_F8 = "f8"
+RECORDING_STOP_APP_CLOSE = "app_close"
+RECORDING_STOP_CAPTURE = "capture_stopped"
+RECORDING_STOP_INPUT_CONTROL = "input_control_enabled"
+# Bounded wait for the writer to finalise session.json when the app closes.
+RECORDING_CLOSE_WAIT_SECONDS = 3.0
+
+
+def _format_duration(seconds: float) -> str:
+    total = max(0, int(seconds))
+    hours, rest = divmod(total, 3600)
+    minutes, secs = divmod(rest, 60)
+    if hours:
+        return f"{hours}:{minutes:02d}:{secs:02d}"
+    return f"{minutes:02d}:{secs:02d}"
+
+
+def _format_count(value: int) -> str:
+    if value < 1000:
+        return str(value)
+    return f"{value / 1000:.1f}k"
+
+
+def format_recording_status(status: RecordingStatus) -> str:
+    """One-line, display-only text for the Recording panel."""
+    counts = (
+        f"{status.frames} frames · {status.dropped} dropped · "
+        f"{_format_count(status.events)} events"
+    )
+    if status.state == "recording":
+        return f"● REC {_format_duration(status.elapsed)} · {counts}"
+    if status.state == "stopping":
+        return f"Stopping recording ({status.stop_reason}) · {counts}"
+    if status.state == "stopped":
+        name = status.session_dir.name if status.session_dir is not None else "?"
+        return (
+            f"Recording saved: recordings/{name} · {_format_duration(status.elapsed)} · "
+            f"{counts} · stop: {status.stop_reason}"
+        )
+    if status.state == "failed":
+        return f"Recording failed: {status.error}"
+    return f"Recording: {status.state}"
 
 
 class _PlannerLogHandler(logging.Handler):
@@ -71,6 +126,8 @@ class PersonalGameAIApp:
         self.base_dir = Path(__file__).resolve().parent
         self.templates_dir = self.base_dir / "templates"
         self.snapshots_dir = self.base_dir / "snapshots"
+        # Created by the recording thread on first use, never on the Tk thread.
+        self.recordings_dir = self.base_dir / "recordings"
         self.templates_dir.mkdir(exist_ok=True)
         self.snapshots_dir.mkdir(exist_ok=True)
 
@@ -84,6 +141,11 @@ class PersonalGameAIApp:
         self.rule_engine = RuleEngine()
         self.dispatcher = ActionDispatcher(self.input)
         self.planner = PlannerController(self.game_state)
+        # Polled on the recording thread: read the plain bool, never a Tk variable.
+        self.recorder = RecordingController(
+            app_version=APP_VERSION,
+            input_control_enabled=lambda: self.input.enabled,
+        )
 
         self.preview_photo = None
         self.preview_image_item = None
@@ -132,6 +194,19 @@ class PersonalGameAIApp:
         # Bumped on every planner start/stop (Tk thread only) so cycle reports
         # from a stopped or replaced scheduler are never displayed.
         self._planner_generation = 0
+
+        self.record_fps_var = tk.StringVar(value=f"{RECORDING_DEFAULT_FPS:g}")
+        self.recording_status_var = tk.StringVar(value=RECORDING_IDLE_TEXT)
+        # Tk-thread view of the recorder: "idle", "starting", "recording" or
+        # "stopping". Status reports arrive from the recording thread through
+        # a queue drained by _poll_preview (the recording thread never calls
+        # into Tk, so it can never block on it), and are dropped unless they
+        # belong to the current generation (bumped on every Record press).
+        self._recording_ui_state = "idle"
+        self._recording_generation = 0
+        self._recording_status_queue: queue.SimpleQueue[tuple[int, RecordingStatus]] = (
+            queue.SimpleQueue()
+        )
 
         self._build_ui()
         self._planner_logger = logging.getLogger("agent.planner_scheduler")
@@ -314,6 +389,39 @@ class PersonalGameAIApp:
             planner_box, textvariable=self.planner_last_cycle_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
+        recording_box = ttk.LabelFrame(
+            outer,
+            text="Recording — your own demonstrations (off while input control is enabled)",
+        )
+        recording_box.pack(fill="x", pady=(0, 8))
+
+        recording_row = ttk.Frame(recording_box)
+        recording_row.pack(fill="x", padx=8, pady=(7, 4))
+
+        self.record_button = ttk.Button(
+            recording_row, text="Record", command=self.toggle_recording
+        )
+        self.record_button.pack(side="left")
+        ttk.Label(recording_row, text="FPS:").pack(side="left", padx=(15, 4))
+        self.record_fps_spin = ttk.Spinbox(
+            recording_row,
+            from_=RECORDING_MIN_FPS,
+            to=RECORDING_MAX_FPS,
+            increment=1,
+            textvariable=self.record_fps_var,
+            width=5,
+        )
+        self.record_fps_spin.pack(side="left")
+        ttk.Label(
+            recording_row,
+            text="Frames, detector state and your keyboard/mouse input while the "
+            "game window is focused. Saved locally in recordings/.",
+        ).pack(side="left", padx=(15, 0))
+        ttk.Label(
+            recording_box, textvariable=self.recording_status_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+        self._refresh_recording_controls()
+
         info = ttk.Frame(outer)
         info.pack(fill="x", pady=(0, 2))
         ttk.Label(info, textvariable=self.status_var).pack(side="left")
@@ -403,8 +511,13 @@ class PersonalGameAIApp:
             self.log(f"Capture started: {win32gui.GetWindowText(hwnd)}")
         except Exception as exc:
             messagebox.showerror("Start Capture", str(exc))
+        finally:
+            self._refresh_recording_controls()
 
     def stop_capture(self, silent: bool = False):
+        # A recording samples this capture's frames; it cannot outlive it.
+        if self._request_recording_stop(RECORDING_STOP_CAPTURE):
+            self.log("Recording stopped because capture stopped.")
         if self.capture:
             self.capture.stop()
             self.capture = None
@@ -415,6 +528,7 @@ class PersonalGameAIApp:
                 self.log("Capture stopped.")
         if self.status_var.get() != "EMERGENCY STOP (F8)":
             self.status_var.set("READY")
+        self._refresh_recording_controls()
 
     def focus_game(self):
         try:
@@ -434,6 +548,11 @@ class PersonalGameAIApp:
     # ---------------- Input ----------------
 
     def _toggle_control(self):
+        if self.control_var.get():
+            # Recording and autonomous input are mutually exclusive: the
+            # dataset must only contain the player's own input.
+            if self._request_recording_stop(RECORDING_STOP_INPUT_CONTROL):
+                self.log("Recording stopped because input control was enabled.")
         self.input.set_enabled(self.control_var.get())
         if self.control_var.get():
             self.status_var.set("INPUT ENABLED")
@@ -442,6 +561,7 @@ class PersonalGameAIApp:
             if self.status_var.get() != "EMERGENCY STOP (F8)":
                 self.status_var.set("CAPTURING" if self.capture else "READY")
             self.log("Keyboard/mouse control DISABLED; generated inputs released.")
+        self._refresh_recording_controls()
 
     def test_w(self):
         if not self.control_var.get():
@@ -484,7 +604,7 @@ class PersonalGameAIApp:
             self.log(f"Click error: {exc}")
             messagebox.showerror("Click", str(exc))
 
-    def emergency_stop(self):
+    def emergency_stop(self, recording_reason: str = RECORDING_STOP_F8):
         # Release input first; nothing should delay disabling input.
         self.input.set_enabled(False)
         self.control_var.set(False)
@@ -496,6 +616,13 @@ class PersonalGameAIApp:
         self.planner_status_var.set("Planner: disabled by emergency stop.")
         if planner_was_running:
             self.log("LLM planner stopped by emergency stop.")
+        # Recording stops last; stop() is non-blocking.
+        if self._request_recording_stop(recording_reason):
+            if recording_reason == RECORDING_STOP_APP_CLOSE:
+                self.log("Recording stopped because the app is closing.")
+            else:
+                self.log("Recording stopped by emergency stop.")
+        self._refresh_recording_controls()
         self.log("EMERGENCY STOP: generated inputs released; input control disabled.")
 
     def _start_hotkey_listener(self):
@@ -506,6 +633,140 @@ class PersonalGameAIApp:
         self.hotkey_listener = keyboard.Listener(on_press=on_press)
         self.hotkey_listener.daemon = True
         self.hotkey_listener.start()
+
+    # ---------------- Recording ----------------
+
+    def toggle_recording(self):
+        if self._recording_ui_state in ("starting", "recording"):
+            if self._request_recording_stop(RECORDING_STOP_USER):
+                self.log("Recording stop requested.")
+            self._refresh_recording_controls()
+            return
+        self.start_recording()
+
+    def start_recording(self):
+        if self._recording_ui_state != "idle":
+            return
+        if self.capture is None:
+            messagebox.showwarning("Record", "Start Capture first.")
+            return
+        if self.input.enabled or self.control_var.get():
+            messagebox.showwarning(
+                "Record", "Disable keyboard/mouse control before recording."
+            )
+            return
+        try:
+            fps = validate_fps(float(self.record_fps_var.get()))
+        except ValueError:
+            messagebox.showerror(
+                "Record",
+                f"Recording FPS must be a number from {RECORDING_MIN_FPS:g} "
+                f"to {RECORDING_MAX_FPS:g}.",
+            )
+            return
+
+        self._recording_generation += 1
+        generation = self._recording_generation
+        try:
+            started = self.recorder.start(
+                self.capture.hwnd,
+                self.capture,
+                self.game_state,
+                self.recordings_dir,
+                fps,
+                on_status=lambda status: self._schedule_recording_status(generation, status),
+            )
+        except RecordingRefusedError as exc:
+            messagebox.showwarning("Record", str(exc))
+            return
+        if not started:
+            self.log("Previous recording is still closing; try Record again in a moment.")
+            return
+
+        self._recording_ui_state = "starting"
+        self.recording_status_var.set(f"● REC starting at {fps:g} FPS…")
+        self._refresh_recording_controls()
+        self.log(
+            f"Recording STARTED at {fps:g} FPS. Only your input while the game "
+            "window is focused is recorded; F8 stops it."
+        )
+
+    def _request_recording_stop(self, reason: str) -> bool:
+        """Ask the recorder to stop (non-blocking).
+
+        Always forwards to the controller (a no-op when nothing runs). Returns
+        True only when this call is what stopped an active recording.
+        """
+        self.recorder.stop(reason)
+        if self._recording_ui_state not in ("starting", "recording"):
+            return False
+        self._recording_ui_state = "stopping"
+        self.recording_status_var.set(f"Stopping recording ({reason})…")
+        return True
+
+    def _refresh_recording_controls(self):
+        state = self._recording_ui_state
+        if state in ("starting", "recording"):
+            text, enabled = "Stop Recording", True
+        elif state == "stopping":
+            text, enabled = "Stopping…", False
+        else:
+            text = "Record"
+            enabled = self.capture is not None and not self.input.enabled
+        self.record_button.configure(text=text, state="normal" if enabled else "disabled")
+        self.record_fps_spin.configure(state="normal" if state == "idle" else "disabled")
+
+    def _schedule_recording_status(self, generation: int, status: RecordingStatus):
+        """Called on the recording thread; hand the status to the Tk thread.
+
+        Only a non-blocking queue put: unlike root.after, it cannot wait on a
+        busy or closing Tk thread and stall the recorder's shutdown.
+        """
+        if not self._closing:
+            self._recording_status_queue.put_nowait((generation, status))
+
+    def _drain_recording_status(self):
+        while True:
+            try:
+                generation, status = self._recording_status_queue.get_nowait()
+            except queue.Empty:
+                return
+            self._show_recording_status(generation, status)
+
+    def _show_recording_status(self, generation: int, status: RecordingStatus):
+        if self._closing or generation != self._recording_generation:
+            return
+        if status.state == "recording":
+            # A progress report queued before Stop must not undo "stopping".
+            if self._recording_ui_state not in ("starting", "recording"):
+                return
+            self._recording_ui_state = "recording"
+        elif status.state == "stopping":
+            self._recording_ui_state = "stopping"
+        elif status.state in ("stopped", "failed"):
+            self._recording_ui_state = "idle"
+            if status.state == "failed":
+                self.log(f"Recording FAILED: {status.error}")
+            else:
+                name = status.session_dir.name if status.session_dir is not None else "?"
+                self.log(
+                    f"Recording saved to recordings/{name} "
+                    f"({status.frames} frames, {status.dropped} dropped, "
+                    f"{status.events} events; stop: {status.stop_reason})."
+                )
+        self.recording_status_var.set(format_recording_status(status))
+        self._refresh_recording_controls()
+
+    def _sync_recording_state(self):
+        """Safety net if a final status report never reached the Tk thread.
+
+        Runs after _drain_recording_status; the recorder queues its final
+        report before is_running turns False, so this only fires if it was lost.
+        """
+        if self._recording_ui_state != "idle" and not self.recorder.is_running:
+            self._recording_ui_state = "idle"
+            self.recording_status_var.set("Recording: stopped (final status not received).")
+            self._refresh_recording_controls()
 
     # ---------------- Vision ----------------
 
@@ -860,6 +1121,9 @@ class PersonalGameAIApp:
         if self._closing:
             return
 
+        self._drain_recording_status()
+        self._sync_recording_state()
+
         if self.capture:
             frame = self.capture.latest_frame()
             self.fps_var.set(f"Capture: {self.capture.actual_fps:.1f} FPS")
@@ -941,10 +1205,17 @@ class PersonalGameAIApp:
     def close(self):
         self._closing = True
         try:
-            self.emergency_stop()
+            self.emergency_stop(recording_reason=RECORDING_STOP_APP_CLOSE)
             self.stop_capture(silent=True)
             if getattr(self, "hotkey_listener", None):
                 self.hotkey_listener.stop()
+            # Bounded: give the writer a moment to finalise session.json. The
+            # recording thread only queues status reports and never calls into
+            # Tk, so it cannot be stuck waiting on this thread.
+            if not self.recorder.wait_stopped(RECORDING_CLOSE_WAIT_SECONDS):
+                logging.getLogger(__name__).warning(
+                    "Recording was still closing when the app exited."
+                )
         finally:
             self._planner_logger.removeHandler(self._planner_log_handler)
             self.root.destroy()

@@ -41,11 +41,27 @@
   F8 stops input first, then the planner.
 - Live-smoke-tested on Windows with the real model.
 
-## Next — v0.5 Demonstration recording
+### Stage 5 — Demonstration recording (v0.5, Issue #41)
+- Default-off "Recording" panel that saves the captured window's frames,
+  `GameState` snapshots and the user's own keyboard/mouse input, all on one
+  monotonic clock, into per-session folders (`frames/*.jpg`, `events.jsonl`,
+  `session.json`).
+- Input is recorded only while the game window is in the foreground, with
+  client-relative coordinates. F8 and injected input are never recorded.
+- The `recording/` package only listens and never sends input. Recording and
+  autonomous input control are mutually exclusive.
+- Fail-safes: 30-minute session cap and a stop below 1 GB of free disk. Frames
+  can be dropped and counted when the writer falls behind; events never are.
+- `scripts/recordings.py` offers `list` / `validate` / `export` (aligned
+  frame ↔ state ↔ action `dataset.jsonl`) / `review` (overlay viewer).
+- Live-smoke-tested on Windows at 150% scaling with 0 dropped frames at 10 fps.
 
-- Record screen state plus the user's actions.
-- Build datasets for repeatable tasks.
-- Optional imitation-learning experiments.
+## Next — to be decided
+
+- Imitation-learning experiments on recorded datasets (offline training only).
+  Any replay of recorded or learned actions into a game must go through the
+  gated `ActionDispatcher`.
+- Or move toward v1.0 (below).
 
 ## Later
 

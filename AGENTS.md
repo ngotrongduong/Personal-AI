@@ -4,7 +4,7 @@
 
 Before anything else, read [`docs/HANDOFF.md`](docs/HANDOFF.md) (current open
 PRs, who owns what, active blockers) and [`docs/PLAN.md`](docs/PLAN.md) (granular
-v0.3 checklist with status/owner per task). This file (`AGENTS.md`) is the stable
+checklist for the current milestone with status/owner per task). This file (`AGENTS.md`) is the stable
 rulebook; those two are fast-changing state — update them when you finish a
 meaningful chunk of work, **in the same push**, not as an afterthought (a doc
 pushed as a later, separate commit to an already-reviewed PR can be merged out
@@ -49,7 +49,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- `feature/v0.4-llm-planner` is the current v0.4 integration branch; v0.4 work branches from it, not from `main`.
+- There is no active integration branch right now. v0.5.0 has been released to `main`. The next milestone gets its own `feature/<milestone>` branch from `main` once the user chooses it.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -60,7 +60,7 @@ This repo is developed by more than one AI assistant at once (Claude Code, Codex
 - Codex/ChatGPT uses branch names `codex/<task>`.
 - Nobody pushes directly to `main` or to an active integration branch (e.g. `feature/v0.3-game-state`); every change lands through a PR.
 - Before starting a task: `git fetch` and check existing branches/open PRs to confirm the task is not already in progress on another branch.
-- PRs for v0.4 sub-tasks target `feature/v0.4-llm-planner`, not `main`. That branch merges into `main` only once v0.4 is complete and stable.
+- PRs for a milestone's sub-tasks target that milestone's integration branch, not `main`. The integration branch merges into `main`, as a merge commit, only once the milestone is complete and stable.
 
 **Default task assignment:** Claude Code's context/token budget for this repo is
 more limited per session than Codex/ChatGPT's, so route work accordingly rather
@@ -79,11 +79,11 @@ than defaulting everything to whichever assistant is already in the conversation
 ```
 main
   ^
-  | PR (v0.4 complete)
-feature/v0.4-llm-planner
+  | PR (milestone complete, merge commit)
+feature/<milestone>
   ^
-  |-- claude/<task>   (PR back into feature/v0.4-llm-planner)
-  |-- codex/<task>    (PR back into feature/v0.4-llm-planner)
+  |-- claude/<task>   (PR back into feature/<milestone>)
+  |-- codex/<task>    (PR back into feature/<milestone>)
   `-- codex/<task-2>
 ```
 
@@ -91,11 +91,12 @@ feature/v0.4-llm-planner
 - Keep commits scoped and descriptive.
 - Before merge: run syntax checks, lint, and the test suite (see `scripts/test.ps1` / CI).
 
-## v0.4 priority
+## Current priority
 
-Follow GitHub Issue #15: Ollama HTTP client, planner directive schema/validator,
-`agent/llm_planner.py`, cadence/timer isolated from the fast loop,
-fallback/timeout handling, config surface, decision logging, fake-client tests,
-then Claude's real-Ollama Windows install + live integration smoke test. The
-planner must never bypass any v0.3 safety gate — see `docs/PLAN.md`'s design
-constraint section before implementing anything here.
+v0.5.0 (Issue #41, demonstration recording) is released. The next milestone is
+not decided yet (`docs/ROADMAP.md`), so ask the user before starting one.
+
+Recording invariant (permanent): recording only listens — it must never send input, never run while
+autonomous input control is enabled, and never record input while the game
+window is not foreground. See `docs/PLAN.md`'s design constraint section before
+implementing anything here.
