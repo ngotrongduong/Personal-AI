@@ -21,7 +21,8 @@ file and `docs/PLAN.md` in the same push as the work.
 **v0.7 "Closed-loop planner" (Issue #61) is in progress** on
 `feature/v0.7-closed-loop-planner`, branched from `main` at the v0.6.0 release.
 Task 0 (kickoff: issue, branch, `docs/PLAN.md` spec, `AGENTS.md` planner
-invariant, draft PR feature→`main`) is done. The user approved the
+invariant, draft PR #63 feature→`main`) and task 1 (`run_skill`
+directive, closed-loop prompt, `StepHistory`, `ProposalMailbox`) are done. The user approved the
 design on 2026-09-24:
 - the LLM proposes `run_skill` with a skill name only;
 - approve-each-step is the default, and auto mode is opt-in with a step cap and
@@ -306,8 +307,8 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 task 1: the `run_skill` directive, the closed-loop prompt,
-`agent/step_history.py` and `agent/proposal_mailbox.py` (see `docs/PLAN.md`).
+v0.7 task 2: `agent/autopilot.py`, the pure approve/auto state machine (see
+`docs/PLAN.md`).
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
 
