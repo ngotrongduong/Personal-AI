@@ -62,6 +62,15 @@ class PlannerConfigTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, message):
                     load_planner_config({"planner": {"enabled": False, **block}})
 
+    def test_llm_notes_defaults_off_and_must_be_a_boolean(self) -> None:
+        self.assertFalse(load_planner_config({}).llm_notes)
+        self.assertFalse(load_planner_config({"planner": {"enabled": False}}).llm_notes)
+        self.assertTrue(load_planner_config({"planner": {"llm_notes": True}}).llm_notes)
+        for value in (1, "true", None, [True]):
+            with self.subTest(value=value):
+                with self.assertRaisesRegex(ValueError, "llm_notes must be a boolean"):
+                    load_planner_config({"planner": {"llm_notes": value}})
+
     def test_enabled_planner_requires_model(self) -> None:
         with self.assertRaisesRegex(ValueError, "model"):
             load_planner_config({"planner": {"enabled": True}})

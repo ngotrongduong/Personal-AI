@@ -14,7 +14,7 @@ import unittest
 
 ROOT = Path(__file__).resolve().parents[1]
 
-MEMORY_MODULES = ("agent/notes.py", "agent/session_log.py")
+MEMORY_MODULES = ("agent/notes.py", "agent/session_log.py", "agent/memory_store.py")
 MEMORY_NAMES = frozenset({"agent.notes", "agent.session_log", "agent.memory_store"})
 ALLOWED_FOR_MEMORY = frozenset(
     {
@@ -113,14 +113,8 @@ def reachable_modules(relative_path: str) -> set[str]:
 
 
 class MemoryBoundaryTests(unittest.TestCase):
-    def memory_modules(self) -> list[str]:
-        modules = list(MEMORY_MODULES)
-        if (ROOT / "agent/memory_store.py").exists():
-            modules.append("agent/memory_store.py")
-        return modules
-
     def test_memory_modules_import_only_plain_stdlib_and_each_other(self) -> None:
-        for module in self.memory_modules():
+        for module in MEMORY_MODULES:
             with self.subTest(module=module):
                 self.assertTrue((ROOT / module).exists())
                 extra = imported_modules(module) - ALLOWED_FOR_MEMORY
