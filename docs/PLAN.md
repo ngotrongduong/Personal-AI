@@ -203,7 +203,7 @@ Every other shape is still rejected.
 | 3 | Scheduler gate + controller wiring | Done | Claude, safety-reviewer | `should_plan` skip (no planner call), cancellable proposal sink (post after stop raises `PlannerCancelledError`), generation per start. |
 | 4 | Profile `planner.goal` / `planner.auto_max_steps` | Done | Claude | Loader validation, save round-trip, `PlannerConfig` fields. |
 | 5 | UI Planner panel + executor + F8 wiring | Done | Claude, safety-reviewer | Tk tests like `tests/test_main_skills_panel.py`: approve runs through the executor, reject/expire release the mailbox, auto needs input on and a confirmation, the auto-off triggers, F8 order, stale generation dropped, planner reports via queue. safety-reviewer PASS WITH NOTES; fixed: auto re-checked after its confirmation (F8 meanwhile wins), auto pinned to the confirmed window, auto click skills need the foreground, proposals older than the TTL dropped, the generation re-checked per step. |
-| 6 | Live Windows smoke test | Todo | Claude | See the acceptance criteria. |
+| 6 | Live Windows smoke test | Done | Claude | Passed 2026-09-25 on Notepad with Ollama `qwen3.5:9b`, all 9 criteria; results below. No app bug found. |
 | R | Release close-out (v0.7.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #61. |
 
 Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
@@ -231,6 +231,64 @@ Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
 8. Save Profile writes `goal` / `auto_max_steps`, and Load restores them.
 9. All v0.3–v0.6 safety invariants still hold (F8, input-enable gate,
    dispatcher gates, key allowlist/foreground, recording only listens).
+
+## Smoke test results (task 6, 2026-09-25)
+
+Setup:
+- a throwaway Notepad tab (only Notepad received input);
+- `profiles/example` loaded;
+- planner every 5 s with the goal "Keep typing the letter x into Notepad: run
+  type_x on every step, there is no limit.";
+- Ollama request times read from its `server.log`.
+
+1. **Pass.** With `type_x` disabled, every cycle was `noop`:
+   - 29 cycles about 7.4 s apart, never pausing (the mailbox stayed empty);
+   - then 4 more cycles after a restart.
+2. **Pass.** After enabling `type_x` and input control, a `type_x` proposal
+   appeared with a reason and a countdown. Notepad stayed empty until Approve
+   (00:24:57), then it got exactly one "x".
+3. **Pass.**
+   - Reject: logged "rejected", and the next cycle proposed again.
+   - Unanswered proposals: expired at exactly 10 s (for example 00:25:00 →
+     00:25:10).
+4. **Pass.** No Ollama request completed while a proposal was pending.
+   - Cycle spacing: 13 s while proposals expired (10 s pending + ~3 s call),
+     against 3–7 s after an Approve or Reject.
+   - Example: requests at 00:25:00 / 13 / 26 / 39 / 52, 00:26:05 / 18 / 32.
+5. **Pass.**
+   - The confirmation dialog stated the cap (3).
+   - Auto ran 3 steps by itself; Notepad got "xxx".
+   - "Auto mode OFF: reached the 3-step limit." (00:27:48).
+   - The next proposal waited for approval again.
+6. **Pass.** Auto was on (cap 10) with the app, not Notepad, in the
+   foreground. Every step was "BLOCKED: Target window is not the foreground
+   window; key blocked", and no "x" was typed. Logged: "Auto mode OFF: 3 failed
+   steps in a row." (00:28:38).
+7. **Pass.** F8 during auto (after one auto "x") at 00:29:28:
+   - auto off and planner stopped ("disabled by emergency stop"), with input
+     control unticked and the proposal cleared;
+   - mode back to approve;
+   - the last Ollama request was at 00:29:27, none after.
+8. **Pass.**
+   - Save Profile as `smoke_v07` (gitignored) wrote the goal and
+     `auto_max_steps: 10`.
+   - Loading `example` cleared the goal and set the cap to 20; loading
+     `smoke_v07` again restored both.
+9. **Pass.**
+   - Input stayed off until ticked, and F8 unticked it.
+   - Profile loads ran with input off and loaded every skill disabled.
+   - Record was disabled while input control was on.
+   - Key skills were BLOCKED outside the foreground (criterion 6).
+   - The model once returned a rule toggle naming the skill `type_x`. It was
+     rejected ("references unknown rule"), and nothing changed.
+   - The full test suite passes: 500 passed, 1 skipped.
+
+Observations (no action needed):
+- The closed loop visibly works. After expirations the model's reasons said
+  "previous attempts expired". After the BLOCKED steps it wrote "previous
+  blocks due to window focus are transient".
+- Approve focuses the game window, as designed. Keystrokes typed afterwards
+  go to the game, not to the app.
 
 ## Explicitly out of scope for v0.7
 
