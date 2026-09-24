@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- The active integration branch is `feature/v0.6-profiles-skills` (Issue #50), branched from `main` at the v0.5.0 release.
+- No integration branch is active: v0.6.0 (`feature/v0.6-profiles-skills`, Issue #50) is released into `main`. The next milestone (v0.7) starts its own `feature/*` branch from `main`.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination

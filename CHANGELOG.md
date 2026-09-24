@@ -2,6 +2,50 @@
 
 All notable project changes are tracked here.
 
+## v0.6.0 — Game Profiles + Skills
+
+- Added runtime game profiles: `profiles/<name>/profile.json` plus
+  `templates/*.png`, with named detectors, skills, rules, key permissions and a
+  planner block.
+  - The loader validates strictly. It rejects unknown fields, duplicate names,
+    missing references and missing templates, and it rejects template paths
+    that leave the profile folder.
+  - A bad profile changes nothing.
+- Added a **Profile** panel: pick a profile, Load it, or Save the current
+  detectors and rules as a new profile.
+  - Load is refused while keyboard/mouse control is on.
+  - Save asks before writing into an existing folder and never deletes files.
+  - Saved click skills start disabled.
+- Added named **skills**: `click` (a detector's box), `press` (one key) and
+  `hold` (a key for N seconds).
+  - Every skill starts disabled. A disabled skill never runs, whether it comes
+    from a rule or from Run.
+  - Keys must be in the profile's `permissions.allowed_keys`. `f8`, the Windows
+    keys, `apps` and key combos are always refused.
+  - Holds are capped at `max_hold_seconds`, which can never exceed 5 s.
+  - Keys are checked twice, by the loader and again by the dispatcher.
+- Added a **Skills** panel with an Enabled checkbox, a Run button and the last
+  result for each skill.
+  - Run needs input control on, and it focuses the game window first.
+  - Rules can fire skills.
+- Skills run one at a time on a worker thread (`SkillExecutor`); a second skill
+  is refused while one is running. `ActionDispatcher` is still the only path to
+  input. It now also:
+  - sends key skills only while the game window is in the foreground, and
+    blocks them otherwise;
+  - enforces the profile's `max_actions_per_second`.
+- F8 turns input control off and releases held keys, cancels the running skill,
+  then stops the planner and recording. A hold ends at once on F8, when input
+  control goes off, or when the game window loses focus.
+- `profiles/*` is gitignored except `profiles/example/profile.json`, a
+  press/hold demo for Notepad.
+- Live-smoke-tested on Windows with Notepad:
+  - skills and rules;
+  - F8 during a hold through the real global hotkey;
+  - key rules blocked while the window was not in the foreground;
+  - loader rejections;
+  - a Save → Load round trip.
+
 ## v0.5.0 — Demonstration recording
 
 - Added a "Recording" panel (default off, explicit Record button, always-visible

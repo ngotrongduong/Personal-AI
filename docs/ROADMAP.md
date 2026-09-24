@@ -56,15 +56,21 @@
   frame ↔ state ↔ action `dataset.jsonl`) / `review` (overlay viewer).
 - Live-smoke-tested on Windows at 150% scaling with 0 dropped frames at 10 fps.
 
-## In progress
-
-### Stage 6 / v0.6 — Game Profiles + Skills (Issue #50)
-- Runtime-loadable per-game profiles, `profiles/<name>/profile.json` plus
-  templates, saved from the UI and edited as JSON.
-- Named skills (`click` / `press` / `hold`) with per-profile permissions: key
-  allowlist, hold cap, rate limit. Rules fire skills. A Skills panel runs them
-  manually.
-- Key skills only while the game window is foreground; F8 releases held keys.
+### Stage 6 — Game Profiles + Skills (v0.6, Issue #50)
+- Per-game profiles loaded at runtime: `profiles/<name>/profile.json` plus
+  templates. Save them from the UI, then edit the JSON. Loading is strictly
+  validated and refused while input control is on.
+- Named skills (`click` / `press` / `hold`), disabled by default.
+- Per-profile permissions:
+  - a key allowlist, checked by the loader and again by the dispatcher;
+  - `f8`, the Windows keys and key combos are always forbidden;
+  - a hold cap of at most 5 s;
+  - a rate limit.
+- Rules fire skills. The Skills panel runs them by hand. Skills run one at a
+  time on a worker thread, still through `ActionDispatcher`.
+- Key skills run only while the game window is in the foreground. F8 releases
+  held keys, then cancels the running skill.
+- Live-smoke-tested on Windows with Notepad, including F8 during a hold.
 
 ## Next (toward v1.0)
 
