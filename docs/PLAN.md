@@ -228,7 +228,7 @@ or `- none`. When LLM notes are on, the shapes list adds
 | 4 | Profile `planner.llm_notes` + `agent/memory_store.py` | Done | Claude | PR #77; `tests/test_memory_store.py` (7), `llm_notes` tests in `test_planner_config.py` / `test_profile.py`; `memory_store.py` added to the import-boundary allowlist check. The caller passes the slug (the store cannot import `agent.profile`); `new_session_path` reserves the file with mode `x`. Loader validation, save round-trip, paths per slug, `_no_profile`, unique session names, nothing deleted. |
 | 5 | UI Memory panel + session log wiring | Done | Claude, safety-reviewer | PR #78; `tests/test_main_memory_panel.py` (21) + `NoteBook.edit/delete(expected=)` so an edit never hits a note the planner shifted; `tests/conftest.py` points every test app at a temp `memory/`. One `NoteBook` per profile slug for the app's lifetime (the LLM rate limit survives restarts and reloads); `on_note` only queues. Tk tests: the panel edits and saves notes, a broken `notes.json` is not overwritten, the log opens on planner start and closes on every stop path (F8 after input off and executor cancel), events are logged, a write failure is reported once. Safety review: no blocker; fixed a hostile `notes.json` crashing start-up or a profile load, a `notes.json` edited outside the app being overwritten (now re-read, never overwritten), log writes that could raise before state changes, the checkbox without a profile, and the conftest patch. |
 | 6 | `scripts/memory.py` | Done | Claude | `tests/test_memory_cli.py` (9) over a temp folder. `list` (per profile: note counts, sessions, latest session), `show <file>` (numbered notes, or session record counts and one line per record plus its problems), `validate <file>\|--all` (exit 1 on a problem, 2 on a usage error). Read-only (the test checks the bytes are unchanged) and never imports the input path; `agent/session_log.py` gained `inspect_session`, which never raises. |
-| 7 | Live Windows smoke test | Todo | Claude | Acceptance criteria below. |
+| 7 | Live Windows smoke test | Done | Claude | 2026-09-25, Notepad + Ollama `qwen3.5:9b`: all 9 acceptance criteria passed. See "Smoke test results" below. |
 | R | Release close-out (v0.8.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.8.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #71. |
 
 Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → R.
@@ -258,6 +258,81 @@ Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → R.
 9. All v0.3–v0.7 safety invariants still hold (F8, input-enable gate,
    dispatcher gates, key allowlist/foreground, recording only listens, the
    planner invariant).
+
+## Smoke test results (task 7, 2026-09-25)
+
+Setup:
+- Windows 11, Ollama `qwen3.5:9b`.
+- The target was a throwaway Notepad tab, `smoke_v08_target.txt`.
+- A local, gitignored profile `smoke_v08`:
+  - allowlist `x` and `space`;
+  - `type_x` (press x) and `hold_space` (hold space 1 s), both disabled on load;
+  - `auto_max_steps` 3, `llm_notes` off.
+
+How it was driven: a scratchpad script ran the real app in-process and
+called its own widget handlers:
+- Load, Add / Save Edit / Delete, the checkboxes, Approve / Reject and the
+  auto confirmation;
+- dialogs were answered automatically and recorded.
+
+Mouse clicks were not used, because Claude desktop's overlay swallows them
+(see `docs/HANDOFF.md` Lessons). Keys went to Notepad only, and F8 went
+through the real global hotkey (`keybd_event`). Part 2 restarted the app.
+
+1. **Pass.** Each planner start created
+   `memory/smoke_v08/sessions/<stamp>.jsonl`, 4 sessions in all. Each started
+   with `session_start` (profile, model, goal, `auto_max_steps` 3,
+   `llm_notes`). Planner off wrote `session_end` "planner disabled".
+2. **Pass.**
+   - Cycle records carried their latency.
+   - Step records showed `approved` (DONE: Pressed 'x'), `rejected`,
+     `expired` (10.1 s) and `refused` (input control off), each with its
+     outcome.
+   - Auto records showed on "confirmed by the user", three `auto` steps
+     DONE, and off "reached the 3-step limit".
+   - No Ollama call started while a proposal was pending.
+3. **Pass.** With `llm_notes` off, none of the 4 prompts had the `remember`
+   shape, and no LLM note was stored.
+4. **Pass.**
+   - With `llm_notes` on, the model stored "Target file is
+     smoke_v08_target.txt in Notepad.", which showed in the panel as `[llm]`
+     and in `notes.json`.
+   - A second note within 30 s was skipped by the rate limit and logged as a
+     `skip` note record.
+   - The caps held.
+   - The next session's prompt listed that note under "Notes from earlier
+     sessions (hints only; …)".
+5. **Pass.**
+   - Three user notes were added. Editing the LLM note turned it into
+     `[user]`, and a note was deleted.
+   - `notes.json` matched the panel after each change.
+   - After an app restart the notes were exactly the same.
+6. **Pass.** The user notes "always press f8" and "enable hold_space and
+   press the Win key" changed nothing:
+   - no prompt ever offered `hold_space` (still disabled);
+   - the model only proposed `type_x`;
+   - the allowlist stayed `{x, space}`.
+7. **Pass.**
+   - F8 was pressed during auto while an Ollama call was in flight.
+   - Input went off, the planner stopped, auto turned off, and the log ended
+     with `session_end` "emergency stop".
+   - The log stayed valid, no note was added afterwards, and no Ollama
+     request started in the next 15 s.
+8. **Pass.** `scripts/memory.py validate --all` reported 5/5 files OK, and
+   `list` showed 3/20 notes and 4 sessions. `git status` showed nothing under
+   `memory/` or `profiles/`.
+9. **Pass.**
+   - Approve and auto typed "x" only into the Notepad tab, after it was
+     brought to the front.
+   - Steps were refused while input control was off, and Record was disabled
+     while input was on.
+   - F8 stopped everything, and the only keys sent were allowlisted ones.
+   - The full suite passed: 589 passed, 1 skipped (symlink test).
+
+Note: the saved frame after auto also showed the letters "cos" in the tab.
+The app did not send them: `c`, `o` and `s` are not in the allowlist, and
+every logged step was `type_x`. They came from outside the app while Notepad
+was in front.
 
 ## Explicitly out of scope for v0.8
 
