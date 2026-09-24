@@ -52,6 +52,14 @@ def window_exists(hwnd: int) -> bool:
     return bool(win32gui.IsWindow(hwnd))
 
 
+def is_foreground(hwnd: int) -> bool:
+    """True only if `hwnd` is the current foreground window; False on any error."""
+    try:
+        return win32gui.GetForegroundWindow() == hwnd
+    except Exception:
+        return False
+
+
 def focus_window(hwnd: int, settle_seconds: float = 0.12) -> bool:
     """Bring a normal desktop window to the foreground for user-initiated input testing."""
     if not win32gui.IsWindow(hwnd):
