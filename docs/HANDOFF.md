@@ -18,9 +18,20 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
-**v0.7 "Closed-loop planner" (Issue #61) is in progress** on
-`feature/v0.7-closed-loop-planner`, branched from `main` at the v0.6.0 release.
-Task 0 (kickoff: issue, branch, `docs/PLAN.md` spec, `AGENTS.md` planner
+**v0.7.0 "Closed-loop planner" (Issue #61) is released.** The integration
+branch `feature/v0.7-closed-loop-planner` merged into `main` via PR #63 as a
+merge commit, which closed Issue #61. `main` has `APP_VERSION = "0.7.0"`.
+
+**Next: v0.8 "Session memory"** (not started): a structured JSONL log of each
+session plus bounded, user-editable notes written by the LLM; memory can never
+widen permissions. It needs a kickoff first: a tracking issue, a
+`feature/v0.8-…` branch from `main`, the `docs/PLAN.md` spec and design
+constraint, and a draft release PR. See "Next task" below.
+
+### v0.7 history (for reference)
+
+Built on `feature/v0.7-closed-loop-planner`, branched from `main` at the
+v0.6.0 release. Task 0 (kickoff: issue, branch, `docs/PLAN.md` spec, `AGENTS.md` planner
 invariant, draft PR #63 feature→`main`) and task 1 (`run_skill`
 directive, closed-loop prompt, `StepHistory`, `ProposalMailbox`) and task 2
 (`Autopilot` approve/auto state machine) and task 3 (scheduler `should_plan`
@@ -45,6 +56,18 @@ with Ollama `qwen3.5:9b`, passed all 9 acceptance criteria on 2026-09-25
 - F8 stopped everything;
 - `goal` / `auto_max_steps` survived a Save/Load.
 
+Task 6's results landed via PR #69. Task R (release close-out: CHANGELOG,
+README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, the
+`setup.ps1` / `check_system.ps1` banners) followed, then PR #63 closed Issue
+#61.
+
+Local leftover branches are safe for the user to delete (Claude avoids
+`git branch -D`): `claude/v0.7-kickoff`, `claude/v0.7-planner-core`,
+`claude/v0.7-autopilot`, `claude/v0.7-scheduler-gate`,
+`claude/v0.7-planner-profile`, `claude/v0.7-planner-panel`,
+`claude/v0.7-smoke-test`, `claude/v0.7-release`, and the older v0.3–v0.6 ones
+listed below and in `git branch`.
+
 The user approved the design on 2026-09-24:
 - the LLM proposes `run_skill` with a skill name only;
 - approve-each-step is the default, and auto mode is opt-in with a step cap and
@@ -52,7 +75,8 @@ The user approved the design on 2026-09-24:
 - a Goal field is saved as `planner.goal`;
 - v0.4 rule toggles are kept and still apply directly.
 
-Codex's CLI is out of quota until 2026-09-25 13:55, so Claude implements.
+Codex's CLI was out of quota until 2026-09-25 13:55, so Claude implemented
+all of v0.7.
 
 **v0.6.0 "Game Profiles + Skills" (Issue #50) is released.** The
 integration branch `feature/v0.6-profiles-skills` merged into `main` via PR #52
@@ -329,10 +353,17 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 task R, the release close-out:
-- CHANGELOG, README, ROADMAP, ARCHITECTURE and AGENTS;
-- `APP_VERSION = "0.7.0"` and the `setup.ps1` / `check_system.ps1` banners;
-- then PR #63 feature→`main` as a merge commit, which closes Issue #61.
+v0.8 kickoff ("Session memory"), following the v0.7 kickoff pattern:
+- open a tracking issue with the goal, safety boundary and checklist;
+- create `feature/v0.8-session-memory` from `main`;
+- replace `docs/PLAN.md` with the v0.8 spec and design constraint (the v0.7
+  plan stays in git history), and update `AGENTS.md` and this file;
+- open a draft release PR feature→`main`.
+
+Settle the design with the user before implementing: the log format and
+where it lives (gitignored, like `recordings/`), how notes are bounded and
+edited, and that memory never widens permissions or enables skills.
+Codex's quota resets 2026-09-25 13:55; pure-logic tasks can go to Codex again.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -368,8 +399,8 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-Issue #61 (v0.7) is open. Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3)
-and Issue #4 are all completed and closed.
+None. Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons
 

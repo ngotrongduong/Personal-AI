@@ -72,12 +72,24 @@
   held keys, then cancels the running skill.
 - Live-smoke-tested on Windows with Notepad, including F8 during a hold.
 
+### Stage 7 — Closed-loop planner (v0.7, Issue #61)
+- The planner can propose `run_skill` with a skill *name* and a reason. It
+  never supplies keys, coordinates or durations, and the skill must be enabled.
+- Closed loop: the prompt carries the goal, the observations, the enabled
+  skills, the rules and the last 5 steps with their outcomes.
+- Approve-each-step by default, with a 10 s expiry. Auto mode is opt-in, never
+  saved, pinned to the confirmed window and capped at `auto_max_steps`
+  (hard cap 100). It turns off after 3 failed steps in a row and on F8, input
+  off, profile load, Clear Rules or planner off.
+- A single-slot proposal mailbox. Only the Tk thread submits skills, after
+  rebuilding them from fresh state, and the dispatcher's gates are unchanged.
+  No LLM call is made while a proposal is pending or a skill is running.
+- `planner.goal` and `planner.auto_max_steps` in the profile.
+- Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`, including
+  F8 during auto.
+
 ## Next (toward v1.0)
 
-- v0.7 — closed-loop planner. The LLM picks a skill *name* from the profile,
-  never coordinates or keys. Approve-each-step by default; explicit opt-in auto
-  mode with a rate limit and an action budget. The outcome is observed after
-  each action.
 - v0.8 — session memory: a structured JSONL log plus bounded, user-editable
   notes written by the LLM. Memory can never widen permissions.
 - Imitation-learning experiments on recorded datasets remain a possible side

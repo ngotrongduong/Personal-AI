@@ -1,6 +1,6 @@
 $ErrorActionPreference = "Stop"
 
-Write-Host "=== PersonalGameAI v0.6.0 setup ===" -ForegroundColor Cyan
+Write-Host "=== PersonalGameAI v0.7.0 setup ===" -ForegroundColor Cyan
 Write-Host ""
 
 if (-not (Get-Command py -ErrorAction SilentlyContinue)) {
