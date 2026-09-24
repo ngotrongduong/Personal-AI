@@ -7,6 +7,12 @@ import time
 from .game_state import BBox, GameState
 
 
+# Action of a rule that fires a named profile skill (v0.6). The rule engine only
+# carries the skill name; `agent.skills.SkillBook` turns it into a concrete
+# click/press/hold intent, and the dispatcher rejects this action on its own.
+SKILL_RULE_ACTION = "skill"
+
+
 @dataclass(frozen=True, slots=True)
 class ActionIntent:
     """A requested action. This object does not execute keyboard/mouse input."""
@@ -18,6 +24,11 @@ class ActionIntent:
     target_bbox: BBox | None
     created_at: float
     reason: str
+    # v0.6 skill fields. Keys and hold times only ever come from a loaded
+    # profile's skills, never from a model or a rule.
+    skill_name: str | None = None
+    key: str | None = None
+    hold_seconds: float | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +41,7 @@ class VisibilityRule:
     min_confidence: float = 0.82
     max_observation_age_seconds: float = 0.75
     cooldown_seconds: float = 1.0
+    skill: str | None = None
 
     def __post_init__(self) -> None:
         if not self.name.strip():
@@ -38,6 +50,13 @@ class VisibilityRule:
             raise ValueError("Rule detector_name cannot be empty.")
         if not self.action.strip():
             raise ValueError("Rule action cannot be empty.")
+        if self.skill is not None and not self.skill.strip():
+            raise ValueError("Rule skill cannot be empty.")
+        if (self.skill is not None) != (self.action == SKILL_RULE_ACTION):
+            raise ValueError(
+                f"A rule fires a skill exactly when action is {SKILL_RULE_ACTION!r} "
+                "and skill is set."
+            )
         if not 0.0 <= self.min_confidence <= 1.0:
             raise ValueError("min_confidence must be between 0.0 and 1.0.")
         if self.max_observation_age_seconds < 0:
@@ -124,6 +143,7 @@ class RuleEngine:
                             f"{rule.detector_name} visible with confidence "
                             f"{observation.confidence:.3f}"
                         ),
+                        skill_name=rule.skill,
                     )
                 )
                 # Emission cooldown is intentionally conservative: even if a future
