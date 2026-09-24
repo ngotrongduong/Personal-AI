@@ -8,6 +8,7 @@ import time
 
 from .game_state import GameState
 from .llm_planner import LlmPlanner, PlannerCancelledError, SkillCatalog
+from .notes import NoteBook, NoteResult
 from .ollama_client import OllamaClient
 from .planner_config import PlannerConfig
 from .planner_scheduler import CycleCallback, PlanGate, PlannerScheduler
@@ -94,6 +95,53 @@ class _CancellableProposalSink:
             self._cancelled = True
 
 
+NoteCallback = Callable[[NoteResult], None]
+
+
+class _ReadOnlyNotes:
+    """What the planner may read from the notebook: the prompt lines only."""
+
+    def __init__(self, notebook: NoteBook) -> None:
+        self._notebook = notebook
+
+    def prompt_lines(self) -> list[str]:
+        return self._notebook.prompt_lines()
+
+
+class _CancellableNoteSink:
+    """Add planner notes to the in-memory notebook until the controller stops.
+
+    Only ``NoteBook.add_llm`` is reachable: the planner can never edit or
+    delete a note. The sink touches no file; the Tk thread saves the notebook.
+
+    ``on_result`` runs on the planner thread *after* the lock is released, so
+    it may arrive after :meth:`cancel` for a note stored just before it. It
+    must not block and must not call Tk (a ``queue.put`` is fine).
+    """
+
+    def __init__(self, notebook: NoteBook, on_result: NoteCallback | None) -> None:
+        self._notebook = notebook
+        self._on_result = on_result
+        self._lock = threading.Lock()
+        self._cancelled = False
+
+    def remember(self, text: str) -> str:
+        with self._lock:
+            if self._cancelled:
+                raise PlannerCancelledError()
+            result = self._notebook.add_llm(text)
+
+        if self._on_result is not None:
+            self._on_result(result)
+        return result.message
+
+    def cancel(self) -> None:
+        """Make every later note raise instead of reaching the notebook."""
+
+        with self._lock:
+            self._cancelled = True
+
+
 class PlannerController:
     """Own the optional planner scheduler without participating in dispatch."""
 
@@ -110,6 +158,7 @@ class PlannerController:
         self._scheduler: PlannerScheduler | None = None
         self._rule_control: _CancellableRuleControl | None = None
         self._proposal_sink: _CancellableProposalSink | None = None
+        self._note_sink: _CancellableNoteSink | None = None
         self._mailbox: ProposalMailbox | None = None
         self._generation = 0
 
@@ -137,6 +186,9 @@ class PlannerController:
         mailbox: ProposalMailbox | None = None,
         should_plan: PlanGate | None = None,
         clock: Callable[[], float] = time.monotonic,
+        notes: NoteBook | None = None,
+        allow_notes: bool = False,
+        on_note: NoteCallback | None = None,
     ) -> bool:
         """Start a configured planner scheduler, replacing any prior scheduler.
 
@@ -148,6 +200,11 @@ class PlannerController:
         raises :class:`PlannerCancelledError` instead. ``should_plan`` gates
         each cycle on the scheduler thread, so it must be thread-safe and must
         not read Tk variables. :meth:`stop` clears ``mailbox``.
+
+        ``notes`` are shown in the prompt. With ``allow_notes`` the planner may
+        also add notes to them (``remember``); ``on_note`` then gets each
+        result on the scheduler thread. After :meth:`stop` a late note raises
+        :class:`PlannerCancelledError` instead.
         """
 
         if not config.enabled or config.ollama is None:
@@ -162,6 +219,9 @@ class PlannerController:
             if mailbox is not None and skills is not None
             else None
         )
+        note_sink = (
+            _CancellableNoteSink(notes, on_note) if notes is not None and allow_notes else None
+        )
         planner = LlmPlanner(
             client,
             rule_control,
@@ -169,6 +229,8 @@ class PlannerController:
             history=history,
             goal=goal,
             proposals=sink,
+            notes=_ReadOnlyNotes(notes) if notes is not None else None,
+            note_sink=note_sink,
         )
         scheduler_options: dict[str, object] = {
             "interval_seconds": config.interval_seconds,
@@ -181,6 +243,7 @@ class PlannerController:
         self._scheduler = scheduler
         self._rule_control = rule_control
         self._proposal_sink = sink
+        self._note_sink = note_sink
         self._mailbox = mailbox if sink is not None else None
         return True
 
@@ -190,6 +253,10 @@ class PlannerController:
         if self._rule_control is not None:
             self._rule_control.cancel()
             self._rule_control = None
+
+        if self._note_sink is not None:
+            self._note_sink.cancel()
+            self._note_sink = None
 
         if self._proposal_sink is not None:
             # Cancel first: once cancel() returns no post can follow, so the
