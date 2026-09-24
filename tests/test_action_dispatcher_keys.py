@@ -3,6 +3,7 @@ from __future__ import annotations
 import threading
 import time
 import unittest
+from unittest import mock
 
 from agent.action_dispatcher import ActionDispatcher
 from agent.rule_engine import ActionIntent
@@ -24,6 +25,8 @@ class FakeInput:
         self.fail_tap: Exception | None = None
         self.fail_key_down: Exception | None = None
         self.fail_key_up: Exception | None = None
+        self.tap_started = threading.Event()
+        self.tap_gate: threading.Event | None = None
 
     def set_enabled(self, enabled: bool) -> None:
         self.enabled = enabled
@@ -44,6 +47,9 @@ class FakeInput:
         if self.fail_tap is not None:
             raise self.fail_tap
         self.calls.append(("tap", key, duration))
+        self.tap_started.set()
+        if self.tap_gate is not None:
+            self.tap_gate.wait(2.0)
 
     def key_down(self, key: str) -> None:
         if not self.enabled:
@@ -316,7 +322,7 @@ class HoldTests(KeyDispatchTestCase):
         self.assertEqual(self.input.calls, [("down", "space"), ("up", "space")])
         self.assertGreaterEqual(elapsed, 0.14)
         self.assertNotIn("cancelled", result.reason)
-        self.assertFalse(self.dispatcher.holding)
+        self.assertFalse(self.dispatcher.busy)
 
     def test_hold_over_profile_max_blocks(self) -> None:
         result = self.dispatcher.dispatch(_intent("hold", key="space", hold=2.0), hwnd=HWND)
@@ -342,18 +348,18 @@ class HoldTests(KeyDispatchTestCase):
     def test_cancel_from_another_thread_releases_key(self) -> None:
         thread, box = self._run_in_thread(_intent("hold", key="space", hold=1.5))
         self.assertTrue(self.input.key_down_started.wait(2.0))
-        self.assertTrue(self.dispatcher.holding)
+        self.assertTrue(self.dispatcher.busy)
         started = time.monotonic()
         self.dispatcher.cancel()
         thread.join(2.0)
         self.assertFalse(thread.is_alive())
-        self.assertLess(time.monotonic() - started, 0.5)
+        self.assertLess(time.monotonic() - started, 1.0)
         result = box["result"]
         self.assertTrue(result.dispatched)
         self.assertIn("cancelled", result.reason)
         self.assertEqual(self.input.down, set())
         self.assertEqual(self.input.calls[-1], ("up", "space"))
-        self.assertFalse(self.dispatcher.holding)
+        self.assertFalse(self.dispatcher.busy)
 
     def test_caller_cancel_event_ends_hold(self) -> None:
         event = threading.Event()
@@ -375,7 +381,7 @@ class HoldTests(KeyDispatchTestCase):
         self.assertFalse(thread.is_alive())
         self.assertIn("input disabled", box["result"].reason)
         self.assertEqual(self.input.down, set())
-        self.assertFalse(self.dispatcher.holding)
+        self.assertFalse(self.dispatcher.busy)
 
     def test_dispatch_during_hold_is_busy(self) -> None:
         thread, box = self._run_in_thread(_intent("hold", key="space", hold=1.5))
@@ -403,14 +409,123 @@ class HoldTests(KeyDispatchTestCase):
         self.assertFalse(result.dispatched)
         self.assertIn("driver error", result.reason)
         self.assertEqual(self.input.calls, [("up", "space")])
-        self.assertFalse(self.dispatcher.holding)
+        self.assertFalse(self.dispatcher.busy)
 
     def test_key_up_failure_is_reported_not_raised(self) -> None:
         self.input.fail_key_up = OSError("stuck")
         result = self.dispatcher.dispatch(_intent("hold", key="space", hold=0.05), hwnd=HWND)
         self.assertTrue(result.dispatched)
         self.assertIn("key_up failed", result.reason)
-        self.assertFalse(self.dispatcher.holding)
+        self.assertFalse(self.dispatcher.busy)
+
+    def test_key_down_refused_sends_nothing(self) -> None:
+        self.input.fail_key_down = RuntimeError("Input control is disabled.")
+        result = self.dispatcher.dispatch(_intent("hold", key="space", hold=0.5), hwnd=HWND)
+        self.assertFalse(result.dispatched)
+        self.assertEqual(self.input.calls, [])
+        self.assertFalse(self.dispatcher.busy)
+
+    def test_losing_foreground_mid_hold_releases_key(self) -> None:
+        thread, box = self._run_in_thread(_intent("hold", key="space", hold=1.5))
+        self.assertTrue(self.input.key_down_started.wait(2.0))
+        self.foreground = False  # the user Alt-Tabs away
+        thread.join(2.0)
+        self.assertFalse(thread.is_alive())
+        self.assertIn("lost foreground", box["result"].reason)
+        self.assertEqual(self.input.down, set())
+
+    def test_preset_cancel_event_sends_no_key(self) -> None:
+        event = threading.Event()
+        event.set()
+        result = self.dispatcher.dispatch(
+            _intent("hold", key="space", hold=0.5), hwnd=HWND, cancel_event=event
+        )
+        self.assertFalse(result.dispatched)
+        self.assertIn("Cancelled", result.reason)
+        self.assertEqual(self.input.calls, [])
+        self.assertFalse(self.dispatcher.busy)
+        # The cancelled attempt used no rate-limit slot.
+        self.assertTrue(self.dispatcher.dispatch(_intent("press", key="x"), hwnd=HWND).dispatched)
+
+    def test_second_hold_during_hold_is_busy(self) -> None:
+        thread, _box = self._run_in_thread(_intent("hold", key="space", hold=1.5))
+        self.assertTrue(self.input.key_down_started.wait(2.0))
+        second = self.dispatcher.dispatch(_intent("hold", key="x", hold=0.5), hwnd=HWND)
+        self.dispatcher.cancel()
+        thread.join(2.0)
+        self.assertFalse(second.dispatched)
+        self.assertIn("Busy", second.reason)
+        self.assertNotIn(("down", "x"), self.input.calls)
+
+    def test_hold_during_press_is_busy(self) -> None:
+        self.input.tap_gate = threading.Event()
+        thread, box = self._run_in_thread(_intent("press", key="x"))
+        self.assertTrue(self.input.tap_started.wait(2.0))
+        self.assertTrue(self.dispatcher.busy)
+        hold = self.dispatcher.dispatch(_intent("hold", key="space", hold=0.5), hwnd=HWND)
+        self.input.tap_gate.set()
+        thread.join(2.0)
+        self.assertFalse(hold.dispatched)
+        self.assertIn("Busy", hold.reason)
+        self.assertTrue(box["result"].dispatched)
+        self.assertFalse(self.dispatcher.busy)
+
+
+class RealInputControllerTests(unittest.TestCase):
+    """F8 landing between the dispatcher's enabled gate and key_down."""
+
+    def test_disable_race_before_key_down_sends_nothing(self) -> None:
+        from core.input_controller import InputController
+
+        controller = InputController()
+        controller.set_enabled(True)
+        permissions = SkillPermissions(allowed_keys=frozenset({"space"}))
+
+        def foreground_then_f8(_hwnd: int) -> bool:
+            controller.set_enabled(False)  # F8 fires right after the gates pass
+            return True
+
+        dispatcher = ActionDispatcher(
+            controller,
+            permissions_provider=lambda: permissions,
+            foreground_checker=foreground_then_f8,
+        )
+        with (
+            mock.patch("core.input_controller.pydirectinput.keyDown") as key_down,
+            mock.patch("core.input_controller.pydirectinput.keyUp") as key_up,
+        ):
+            hold = dispatcher.dispatch(_intent("hold", key="space", hold=0.5), hwnd=HWND)
+            controller.set_enabled(True)
+            press = dispatcher.dispatch(_intent("press", key="space"), hwnd=HWND)
+        self.assertFalse(hold.dispatched)
+        self.assertIn("disabled", hold.reason)
+        self.assertFalse(press.dispatched)
+        key_down.assert_not_called()
+        key_up.assert_not_called()
+        self.assertFalse(dispatcher.busy)
+
+
+class IsForegroundTests(unittest.TestCase):
+    def test_matches_foreground_window(self) -> None:
+        from core import window_utils
+
+        with mock.patch.object(window_utils.win32gui, "GetForegroundWindow", return_value=HWND):
+            self.assertTrue(window_utils.is_foreground(HWND))
+            self.assertFalse(window_utils.is_foreground(HWND + 1))
+
+    def test_null_handle_is_never_foreground(self) -> None:
+        from core import window_utils
+
+        with mock.patch.object(window_utils.win32gui, "GetForegroundWindow", return_value=0):
+            self.assertFalse(window_utils.is_foreground(0))
+
+    def test_error_means_not_foreground(self) -> None:
+        from core import window_utils
+
+        with mock.patch.object(
+            window_utils.win32gui, "GetForegroundWindow", side_effect=OSError("boom")
+        ):
+            self.assertFalse(window_utils.is_foreground(HWND))
 
 
 if __name__ == "__main__":

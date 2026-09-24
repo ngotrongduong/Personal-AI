@@ -31,7 +31,8 @@ PermissionsProvider = Callable[[], SkillPermissions | None]
 ForegroundChecker = Callable[[int], bool]
 
 KEY_ACTIONS = frozenset({"press", "hold"})
-# How often a running hold re-checks its cancel event and the input switch.
+# How often a running hold re-checks its cancel event, the input switch and
+# the foreground window.
 HOLD_POLL_SECONDS = 0.05
 
 
@@ -54,11 +55,17 @@ class ActionDispatcher:
          profile's permissions allow the key (and the hold time), the key is
          one pydirectinput knows, and the window is the foreground window, so
          keys never reach another app.
-    5. No hold is running, and the profile's max_actions_per_second is not
-       exceeded (only when a profile's permissions are loaded).
+    5. No key action is running, and the profile's max_actions_per_second is
+       not exceeded (only when a profile's permissions are loaded).
 
-    A hold is key_down, then a wait that ends early on cancel() or when input
-    control is switched off (F8), then key_up in a `finally`.
+    A hold is key_down, then a wait that ends early on cancel(), when input
+    control is switched off (F8) or when the window loses the foreground, then
+    key_up in a `finally`.
+
+    Threading: a hold blocks its caller for up to 5 s, so it must run on a
+    worker thread, never the Tk thread. cancel() only ends an action that is
+    already running; to stop everything, switch input off first (F8 order),
+    which also blocks any action that has not started yet.
 
     See docs/ARCHITECTURE.md for the full runtime-loop diagram this sits in.
     """
@@ -87,18 +94,21 @@ class ActionDispatcher:
         )
         self._lock = threading.Lock()
         self._recent_dispatches: deque[float] = deque()
-        self._hold_cancel: threading.Event | None = None
+        # Cancel event of the key action (press or hold) currently running.
+        self._active: threading.Event | None = None
 
     @property
-    def holding(self) -> bool:
+    def busy(self) -> bool:
+        """True while a press or hold is running."""
+
         with self._lock:
-            return self._hold_cancel is not None
+            return self._active is not None
 
     def cancel(self) -> None:
         """End a running hold early (its key is released). Safe from any thread."""
 
         with self._lock:
-            event = self._hold_cancel
+            event = self._active
         if event is not None:
             event.set()
 
@@ -110,7 +120,11 @@ class ActionDispatcher:
         now: float | None = None,
         cancel_event: threading.Event | None = None,
     ) -> DispatchResult:
-        """Run `intent` if every gate passes. A hold blocks for its duration."""
+        """Run `intent` if every gate passes. A hold blocks for its duration.
+
+        `cancel_event`, if given, ends a hold early when set; if it is already
+        set, the hold is rejected before any key goes down.
+        """
 
         current = time.monotonic() if now is None else now
 
@@ -187,14 +201,15 @@ class ActionDispatcher:
         denial = permissions.key_denial(key)
         if denial is not None:
             return DispatchResult(intent, False, f"Key blocked: {denial}.")
-        if key not in self._known_keys:
+        if not isinstance(key, str) or key not in self._known_keys:
             return DispatchResult(intent, False, f"Key blocked: unknown key {key!r}.")
 
+        seconds = intent.hold_seconds
         if intent.action == "hold":
-            denial = permissions.hold_denial(intent.hold_seconds)
+            denial = permissions.hold_denial(seconds)
             if denial is not None:
                 return DispatchResult(intent, False, f"Hold blocked: {denial}.")
-        elif intent.hold_seconds is not None:
+        elif seconds is not None:
             return DispatchResult(intent, False, "A press intent cannot carry hold_seconds.")
 
         if not self._is_foreground(hwnd):
@@ -204,27 +219,29 @@ class ActionDispatcher:
                 "Target window is not the foreground window; key blocked.",
             )
 
-        assert isinstance(key, str)
-        if intent.action == "press":
-            refusal = self._admit(permissions, current)
-            if refusal is not None:
-                return DispatchResult(intent, False, refusal)
-            try:
-                self._input.tap_key(key, PRESS_SECONDS)
-            except Exception as exc:
+        event = cancel_event or threading.Event()
+        refusal = self._admit(permissions, current, active=event)
+        if refusal is not None:
+            return DispatchResult(intent, False, refusal)
+        try:
+            if event.is_set():
                 self._forget(current)
-                return DispatchResult(intent, False, str(exc) or type(exc).__name__)
-            return DispatchResult(intent, True, f"Pressed {key!r}.")
+                return DispatchResult(intent, False, "Cancelled before the key was sent.")
+            if intent.action == "press":
+                return self._press(intent, key, current)
+            return self._hold(intent, key, float(seconds), current, hwnd, event)
+        finally:
+            with self._lock:
+                if self._active is event:
+                    self._active = None
 
-        assert intent.hold_seconds is not None
-        return self._hold(
-            intent,
-            key,
-            float(intent.hold_seconds),
-            current,
-            permissions,
-            cancel_event or threading.Event(),
-        )
+    def _press(self, intent: ActionIntent, key: str, current: float) -> DispatchResult:
+        try:
+            self._input.tap_key(key, PRESS_SECONDS)
+        except Exception as exc:
+            self._forget(current)
+            return DispatchResult(intent, False, str(exc) or type(exc).__name__)
+        return DispatchResult(intent, True, f"Pressed {key!r}.")
 
     def _hold(
         self,
@@ -232,30 +249,31 @@ class ActionDispatcher:
         key: str,
         seconds: float,
         current: float,
-        permissions: SkillPermissions,
+        hwnd: int,
         event: threading.Event,
     ) -> DispatchResult:
-        refusal = self._admit(permissions, current, hold_event=event)
-        if refusal is not None:
-            return DispatchResult(intent, False, refusal)
         started = time.monotonic()
+        failure: str | None = None
+        ending = "completed"
+        release = True
         try:
             try:
                 self._input.key_down(key)
+            except RuntimeError as exc:
+                # InputController refuses before sending anything when input
+                # is off, so there is nothing to release.
+                release = False
+                failure = str(exc)
             except Exception as exc:
-                # key_down may have failed after the key went down; release it.
-                self._forget(current)
-                self._release_key(key)
-                return DispatchResult(intent, False, str(exc) or type(exc).__name__)
-
-            try:
-                ending = self._wait_hold(event, seconds)
-            finally:
-                release_error = self._release_key(key)
+                failure = str(exc) or type(exc).__name__
+            else:
+                ending = self._wait_hold(event, seconds, hwnd)
         finally:
-            with self._lock:
-                if self._hold_cancel is event:
-                    self._hold_cancel = None
+            release_error = self._release_key(key) if release else None
+
+        if failure is not None:
+            self._forget(current)
+            return DispatchResult(intent, False, failure)
 
         held = time.monotonic() - started
         reason = f"Held {key!r} for {held:.2f}s"
@@ -265,7 +283,7 @@ class ActionDispatcher:
             reason += f"; key_up failed: {release_error}"
         return DispatchResult(intent, True, reason + ".")
 
-    def _wait_hold(self, event: threading.Event, seconds: float) -> str:
+    def _wait_hold(self, event: threading.Event, seconds: float, hwnd: int) -> str:
         deadline = time.monotonic() + seconds
         while True:
             remaining = deadline - time.monotonic()
@@ -275,6 +293,8 @@ class ActionDispatcher:
                 return "cancelled"
             if not self._input.enabled:
                 return "input disabled"
+            if not self._is_foreground(hwnd):
+                return "lost foreground"
 
     def _release_key(self, key: str) -> str | None:
         try:
@@ -288,17 +308,18 @@ class ActionDispatcher:
         permissions: SkillPermissions | None,
         current: float,
         *,
-        hold_event: threading.Event | None = None,
+        active: threading.Event | None = None,
     ) -> str | None:
         """Reserve a dispatch slot, or return why none is free.
 
-        Nothing waits while holding the lock; a reserved slot is released with
-        `_forget` if the input call then fails.
+        With `active`, also mark a key action as running until the caller
+        clears it. Nothing waits while holding the lock; a reserved slot is
+        released with `_forget` if the input call then fails.
         """
 
         with self._lock:
-            if self._hold_cancel is not None:
-                return "Busy: a hold is in progress."
+            if self._active is not None:
+                return "Busy: a key action is in progress."
             if permissions is not None:
                 capacity, window = _rate_window(permissions.max_actions_per_second)
                 while self._recent_dispatches and current - self._recent_dispatches[0] >= window:
@@ -308,9 +329,9 @@ class ActionDispatcher:
                         "Rate limit: at most "
                         f"{permissions.max_actions_per_second:g} actions per second."
                     )
-            self._recent_dispatches.append(current)
-            if hold_event is not None:
-                self._hold_cancel = hold_event
+                self._recent_dispatches.append(current)
+            if active is not None:
+                self._active = active
         return None
 
     def _forget(self, stamp: float) -> None:
