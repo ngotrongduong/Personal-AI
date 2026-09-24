@@ -202,7 +202,7 @@ Every other shape is still rejected.
 | 2 | `agent/autopilot.py` | Done | Claude | Pure tests: approve/reject/expire, auto execute and step cap, 3 consecutive failures, disarm reasons, a second offer while pending is dropped. |
 | 3 | Scheduler gate + controller wiring | Done | Claude, safety-reviewer | `should_plan` skip (no planner call), cancellable proposal sink (post after stop raises `PlannerCancelledError`), generation per start. |
 | 4 | Profile `planner.goal` / `planner.auto_max_steps` | Done | Claude | Loader validation, save round-trip, `PlannerConfig` fields. |
-| 5 | UI Planner panel + executor + F8 wiring | Todo | Claude, safety-reviewer | Tk tests like `tests/test_main_skills_panel.py`: approve runs through the executor, reject/expire release the mailbox, auto needs input on and a confirmation, the auto-off triggers, F8 order, stale generation dropped, planner reports via queue. |
+| 5 | UI Planner panel + executor + F8 wiring | Done | Claude, safety-reviewer | Tk tests like `tests/test_main_skills_panel.py`: approve runs through the executor, reject/expire release the mailbox, auto needs input on and a confirmation, the auto-off triggers, F8 order, stale generation dropped, planner reports via queue. safety-reviewer PASS WITH NOTES; fixed: auto re-checked after its confirmation (F8 meanwhile wins), auto pinned to the confirmed window, auto click skills need the foreground, proposals older than the TTL dropped, the generation re-checked per step. |
 | 6 | Live Windows smoke test | Todo | Claude | See the acceptance criteria. |
 | R | Release close-out (v0.7.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #61. |
 
@@ -238,7 +238,8 @@ Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
 - Persistent logs and memory (v0.8).
 - The LLM enabling or disabling skills, or editing the profile.
 - Auto-focusing the game window for planner steps: a key step is simply
-  BLOCKED if the game is not foreground.
+  BLOCKED if the game is not foreground. Only the user's own clicks focus the
+  game, like Run: Approve, and confirming auto mode (once).
 - Anti-cheat bypassing, protected-process evasion, memory injection, packet
   manipulation, credential theft, or stealth/persistence behavior. This is a
   standing invariant from `AGENTS.md`.
