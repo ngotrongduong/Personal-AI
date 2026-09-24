@@ -34,7 +34,18 @@ thread-safe `NoteBook`, strict load, atomic save) merged via PR #75. Task 3
 (`remember` directive, Notes section in the prompt, `_CancellableNoteSink`
 in `PlannerController`, import-boundary test) merged via PR #76; `main.py`
 does not pass `notes` / `allow_notes` yet (task 5). Task 4 (profile
-`planner.llm_notes`, `agent/memory_store.py` paths) is done.
+`planner.llm_notes`, `agent/memory_store.py` paths) merged via PR #77.
+Task 5 (the Memory panel: notes list with `[user]`/`[llm]` labels,
+Add / Save Edit / Delete, the "Let the planner write notes" checkbox, the
+session log path; the log opens on planner start and ends on every stop
+path, after input is released on F8; a broken `notes.json` makes the notes
+read-only and is never overwritten) is done. Safety review: no blocker; its
+findings were fixed. A hostile `notes.json` (e.g. `"source": []`, deep
+nesting) never stops start-up or a profile load; a file changed outside the
+app is re-read on the next load and never overwritten; session-log writes
+never raise and happen after the state they record; the planner-notes
+checkbox needs a loaded profile; `tests/conftest.py` always patches the
+memory root.
 
 v0.8 adds a per-planner-session JSONL log and bounded per-profile notes. The
 user edits the notes, and the LLM may add some through a `remember` directive
@@ -372,10 +383,9 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 task 5, the Memory panel and session-log wiring in `main.py` (keep
-one `NoteBook` per loaded profile so the LLM rate limit is not reset; the
-`on_note` callback must only `queue.put`), then task 6 in the order given in
-`docs/PLAN.md`. Each task lands through a `claude/…` or `codex/…` PR into
+v0.8 task 6, `scripts/memory.py` (`list` / `show` / `validate` over a temp
+folder in tests), then task 7 (the live Notepad smoke test) in the order
+given in `docs/PLAN.md`. Each task lands through a `claude/…` or `codex/…` PR into
 `feature/v0.8-session-memory`. Codex's quota resets 2026-09-25 13:55, so
 pure-logic tasks can go to Codex again after that.
 
