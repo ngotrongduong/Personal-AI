@@ -273,6 +273,46 @@ Planner reports and log lines go through a `SimpleQueue` drained in
 proposal and turns auto off as part of stopping the planner, after input is
 released and the executor is cancelled.
 
+## v0.8 session memory
+
+```text
+memory/<profile slug>/            (gitignored, never deleted by the app)
+  notes.json                      NoteBook: ≤ 20 notes, ≤ 10 from the LLM, ≤ 200 chars
+  sessions/<stamp>.jsonl          one planner session, ≤ 5 MB
+
+Tk thread ── Memory panel (add / edit / delete) ──► NoteBook ──► notes.json (atomic save)
+planner thread ── remember {note} ──► cancellable note sink ──► NoteBook.add_llm
+                                         (off unless planner.llm_notes; ≤ 1 per 30 s)
+NoteBook (read-only view) ──► "Notes from earlier sessions" in the prompt (hints only)
+Tk thread ── cycles, steps, auto on/off, notes ──► SessionLogWriter ──► sessions/*.jsonl
+```
+
+- `agent/session_log.py`: a strict record schema, `SessionLogWriter` (never
+  raises; a failure turns that session's log off) and
+  `validate_session` / `inspect_session` for the reader side.
+- `agent/notes.py`: `Note`, the thread-safe `NoteBook`, strict `load_notes`,
+  atomic `save_notes`. `edit` / `delete` take the note the user saw, so an
+  edit never lands on a note the planner shifted.
+- `agent/memory_store.py`: paths per profile slug; `new_session_path` reserves
+  a fresh file and never overwrites one.
+- `agent/planner_controller.py`: each planner generation gets its own
+  cancellable note sink. After `stop()` (F8 included) a note still on its way
+  is discarded. The sink's callback only queues the result for the Tk thread.
+- `main.py` keeps one `NoteBook` per profile slug for the app's lifetime and
+  does all memory file I/O on the Tk thread. A `notes.json` that is invalid,
+  or that changed outside the app, is never overwritten; the notes turn
+  read-only until the profile is loaded again.
+- The session log opens on planner start and ends on every stop path. On F8
+  it ends after input is off, the executor cancelled and the planner stopped,
+  and before recording stops.
+- `scripts/memory.py` (`list` / `show` / `validate`) reads memory and never
+  writes it.
+
+Memory never widens permissions: the profile loader, skills, permissions,
+rules, autopilot, executor and dispatcher never read notes or logs, and
+`tests/test_memory_boundary.py` checks that the memory modules never import
+the input path.
+
 ## Why the LLM is not in the fast loop
 
 The local LLM sits above the deterministic rule layer. It can choose goals or

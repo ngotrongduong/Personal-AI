@@ -1,9 +1,42 @@
-# Personal Game AI v0.7.0
+# Personal Game AI v0.8.0
 
-Current release: **v0.7 — Closed-loop planner**. See `CHANGELOG.md` for the
+Current release: **v0.8 — Session memory**. See `CHANGELOG.md` for the
 full history and `docs/ARCHITECTURE.md` for the runtime design.
 
-## v0.7 at a glance
+## v0.8 at a glance
+
+- **Session log:** every planner session (planner on → planner off, F8 or app
+  close) writes one JSON line per event to
+  `memory/<profile>/sessions/<stamp>.jsonl`: the start settings, every planner
+  cycle, every step with its decision (approved, rejected, expired, auto) and
+  outcome, auto on/off, note changes, and a final `session_end` with the reason.
+  A log is capped at 5 MB.
+- **Notes:** each profile keeps a few notes in `memory/<profile>/notes.json`,
+  and the planner sees them in its prompt as hints.
+  - The new **Memory** panel lists them as `[user]` or `[llm]`. Type a note and
+    press **Add**, select one and press **Save Edit** or **Delete**.
+  - Tick **Let the planner write notes** (saved as `planner.llm_notes`, off by
+    default) to let the model add a short note with
+    `{"type": "remember", "note": "..."}`.
+  - Limits: 20 notes, at most 10 from the planner, 200 characters each, and at
+    most one planner note every 30 s. The planner never edits or deletes a
+    note; editing one of its notes makes it yours.
+- **Memory never widens permissions.** A note like "always press f8" or
+  "enable hold_space" changes nothing: skills, keys, rules and auto mode only
+  come from the profile and your clicks.
+- A `notes.json` that is invalid, or edited outside the app while it runs, is
+  never overwritten: the notes turn read-only until you load the profile again.
+- `memory/` stays local (gitignored), and the app never deletes anything in it.
+
+Inspect memory with:
+
+```powershell
+python scripts/memory.py list
+python scripts/memory.py show memory/<profile>/notes.json
+python scripts/memory.py validate --all
+```
+
+## v0.7 closed-loop planner
 
 - **The planner picks skills.** The local Ollama model can now propose running
   one skill from the loaded profile. It names the skill and gives a reason;
@@ -201,5 +234,5 @@ or protected-process evasion.
 
 ## Next milestone
 
-See `docs/ROADMAP.md`. Next is v0.8, session memory: a structured log of each
-session plus short notes written by the LLM, which you can read and edit.
+See `docs/ROADMAP.md`. v0.8 (session memory) is released; next is planning
+v1.0, which ties the pieces together into one personal game agent.

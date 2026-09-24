@@ -2,6 +2,46 @@
 
 All notable project changes are tracked here.
 
+## v0.8.0 — Session memory
+
+- **Session log** (`agent/session_log.py`): each planner session writes an
+  append-only JSONL file, `memory/<profile>/sessions/<stamp>.jsonl`.
+  - Records: `session_start` (version, profile, model, goal, step cap,
+    `llm_notes`), `cycle`, `step` (skill, reason, decision, outcome), `auto`
+    (on/off with the reason), `note`, `truncated` and `session_end` (planner
+    disabled, restarted, emergency stop or app closed).
+  - The schema is strict. Text is cleaned and cut, a file stops at 5 MB with
+    one `truncated` record, and a write failure turns logging off for that
+    session without ever stopping the app.
+  - The log opens on planner start and ends on every stop path. On F8 it ends
+    after input is released, the skill cancelled and the planner stopped.
+- **Notes** (`agent/notes.py`): a bounded, thread-safe notebook per profile in
+  `memory/<profile>/notes.json`, loaded strictly and saved atomically.
+  - At most 20 notes, at most 10 from the planner, 200 characters each,
+    duplicates dropped, at most one planner note every 30 s. When the planner
+    is at its limit its oldest note is replaced; user notes are never touched.
+  - The planner prompt lists the notes as hints that never change which skills
+    or keys are allowed.
+- **`remember` directive:** `{"type": "remember", "note": "..."}` adds a planner
+  note. It is offered only when the profile sets `planner.llm_notes` (new, off
+  by default), and it can never edit or delete a note. A note in flight is
+  discarded when the planner stops or F8 is pressed.
+- **Memory panel:** the notes list with `[user]` / `[llm]` labels, Add / Save
+  Edit / Delete, the "Let the planner write notes" checkbox (needs a loaded
+  profile; Save Profile keeps it) and the current session log path.
+  - Editing a planner note makes it a user note.
+  - An invalid `notes.json`, or one changed outside the app, is never
+    overwritten: the notes turn read-only until the profile is loaded again.
+- `agent/memory_store.py` decides the paths per profile slug, and new session
+  files never overwrite an old one.
+- `scripts/memory.py list | show <file> | validate <file>|--all` inspects
+  notes and session logs. It is read-only.
+- **Memory never widens permissions:** the profile loader, skills,
+  permissions, rules, autopilot, executor and dispatcher never read memory,
+  and the memory modules never import the input path (checked by a test).
+- Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b` (see
+  `docs/PLAN.md` "Smoke test results").
+
 ## v0.7.0 — Closed-loop planner
 
 - The Ollama planner can now propose running one skill from the loaded
