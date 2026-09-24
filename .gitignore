@@ -7,8 +7,10 @@ venv/
 # Runtime captures / user-generated vision data
 snapshots/*
 templates/*
+recordings/*
 !snapshots/.gitkeep
 !templates/.gitkeep
+!recordings/.gitkeep
 
 # Logs
 logs/

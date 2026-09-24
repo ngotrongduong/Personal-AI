@@ -17,16 +17,27 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-24)
 
+**v0.5 ("Demonstration recording", Issue #41) has started.** Integration
+branch: `feature/v0.5-demo-recording` (branched from `main` at the v0.4.0
+release). Task 0 (kickoff: issue, branch, `docs/PLAN.md`, `AGENTS.md`,
+`recordings/` gitignored, draft PR feature→`main`) is done. Next: tasks 1-3
+(`recording/schema.py`, `recording/session_writer.py`,
+`recording/input_recorder.py`), delegated to Codex — see `docs/PLAN.md` for
+the design constraint (recording only listens, never sends input, is mutually
+exclusive with autonomous input control, and records input only while the game
+window is foreground).
+
 **v0.4.0 ("Local AI Planner", Issue #15) is released: merged into `main`**
 via PR #16 (merge commit `5b24233`). Issue #15 is closed, and
 `feature/v0.4-llm-planner` plus its sub-branches were deleted. `main` has
-`APP_VERSION = "0.4.0"`; 146/146 tests pass, ruff clean. No milestone is in
-progress yet; see "Next task" below.
+`APP_VERSION = "0.4.0"`; 146/146 tests pass, ruff clean.
 
 v0.3 ("Game State + Rules", Issue #1) was merged into `main` earlier (PR #2,
 merge commit `ef3ad40`). Issue #1 is closed.
 
-The v0.4 history below is kept for reference. **v0.4 was built** on
+### v0.4 history (for reference)
+
+**v0.4 was built** on
 `feature/v0.4-llm-planner`. Backend decision: **Ollama** (user confirmed,
 2026-09-23) — headless REST API, no GUI dependency, fits local scripted
 verification. See `docs/PLAN.md` for the full checklist/design constraint
@@ -231,11 +242,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Scope v0.5 (demonstration recording: record screen state plus the user's
-actions to build datasets, per `docs/ROADMAP.md`). Create a new issue, a
-`feature/v0.5-...` integration branch with a draft PR into `main`, and a fresh
-`docs/PLAN.md`. The v0.4 checklist stays in git history. Ollama and
-`qwen3.5:9b` are installed locally.
+v0.5 tasks 1-3 (Issue #41, `docs/PLAN.md`): `recording/schema.py`,
+`recording/session_writer.py`, `recording/input_recorder.py`. They are
+independent pure-logic modules with injected fakes, so they are Codex's lane;
+PR each into `feature/v0.5-demo-recording`. Then task 4 (controller), 5 (UI),
+6 (review/export), 7 (Claude live smoke), R (release). Ollama and
+`qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
 - an optional directive `reason` field;
@@ -258,7 +270,8 @@ Record that local verification explicitly in each PR.
 
 ### Open issue
 
-None. Issue #15 (v0.4), Issue #1 (v0.3) and Issue #4 are all completed/closed.
+Issue #41 (v0.5 demonstration recording) — the active milestone. Issue #15
+(v0.4), Issue #1 (v0.3) and Issue #4 are all completed/closed.
 
 ## Lessons
 
