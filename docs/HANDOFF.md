@@ -39,7 +39,9 @@ Task 5 (the Memory panel: notes list with `[user]`/`[llm]` labels,
 Add / Save Edit / Delete, the "Let the planner write notes" checkbox, the
 session log path; the log opens on planner start and ends on every stop
 path, after input is released on F8; a broken `notes.json` makes the notes
-read-only and is never overwritten) is done. Safety review: no blocker; its
+read-only and is never overwritten) merged via PR #78. Task 6
+(`scripts/memory.py list | show <file> | validate <file>|--all`, read-only,
+exit 1 on a problem) is done. Task 5's safety review: no blocker; its
 findings were fixed. A hostile `notes.json` (e.g. `"source": []`, deep
 nesting) never stops start-up or a profile load; a file changed outside the
 app is re-read on the next load and never overwritten; session-log writes
@@ -383,9 +385,8 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 task 6, `scripts/memory.py` (`list` / `show` / `validate` over a temp
-folder in tests), then task 7 (the live Notepad smoke test) in the order
-given in `docs/PLAN.md`. Each task lands through a `claude/…` or `codex/…` PR into
+v0.8 task 7 (the live Notepad smoke test with Ollama `qwen3.5:9b`, against
+the acceptance criteria in `docs/PLAN.md`), then task R (release close-out). Each task lands through a `claude/…` or `codex/…` PR into
 `feature/v0.8-session-memory`. Codex's quota resets 2026-09-25 13:55, so
 pure-logic tasks can go to Codex again after that.
 
