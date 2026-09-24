@@ -34,13 +34,14 @@ draft PR feature→`main` (PR #51; the draft release PR is #52). Task 1
 `profiles/example/profile.json`) via PR #54, task 3 (dispatcher `press`/`hold`,
 foreground check, allowlist re-check, rate limit, cancel) via PR #55, task 4
 (`agent/skill_executor.py`, with a safety-reviewer pass) via PR #56, task 5
-(UI Profile panel: Load/Save) via PR #57. Task 6 (Skills panel, rule→skill
-through the executor, F8 wiring, with a safety-reviewer pass) is done by Claude
-on `claude/v0.6-skills-ui`. Codex was retried on 2026-09-24, but its CLI still
-reported the usage limit (reset 2026-09-25 13:55), so Claude keeps
-implementing. Next is task 7, the live Notepad smoke test on Windows (see
-PLAN acceptance criteria); it must also confirm that F8 inside the real pynput
-hook releases a held key at once. Then task R (release v0.6.0).
+(UI Profile panel: Load/Save) via PR #57, task 6 (Skills panel, rule→skill
+through the executor, F8 wiring, with a safety-reviewer pass) via PR #58.
+Task 7, the live Notepad smoke test, passed on 2026-09-24, including F8 inside
+the real pynput hook releasing a held key at once, a click skill rule, and a
+key skill rule BLOCKED while Notepad was not foreground (details in PLAN row 7).
+Codex was retried on 2026-09-24, but its CLI still reported the usage limit
+(reset 2026-09-25 13:55), so Claude keeps implementing. Next is task R
+(release v0.6.0).
 See `docs/PLAN.md` for the design constraint and checklist.
 
 **v0.5.0 ("Demonstration recording", Issue #41) is released**, merged into
@@ -284,8 +285,7 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.6 tasks 1 and 2 (`agent/skills.py`, `agent/profile.py`), in parallel;
-see `docs/PLAN.md`. Never commit a recording, a profile template PNG or any
+v0.6 task R (release v0.6.0); see `docs/PLAN.md`. Never commit a recording, a profile template PNG or any
 other user data, because the repo is public.
 
 Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set

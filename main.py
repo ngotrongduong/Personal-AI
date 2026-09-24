@@ -1144,7 +1144,7 @@ class PersonalGameAIApp:
         self.profile_status_var.set(
             f"Profile: {profile.name} (profiles/{folder_name}) · "
             f"{len(profile.detectors)} detectors · {len(skill_book.names)} skills "
-            f"({enabled} enabled) · {len(rule_engine.rules)} rules"
+            f"({enabled} enabled in file) · {len(rule_engine.rules)} rules"
         )
         self.log(
             f"Profile '{profile.name}' loaded from profiles/{folder_name}. "
