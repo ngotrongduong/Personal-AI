@@ -1,0 +1,16 @@
+{
+  "format_version": 1,
+  "name": "Notepad demo",
+  "permissions": {
+    "allowed_keys": ["space", "x"],
+    "max_hold_seconds": 1.5,
+    "max_actions_per_second": 5
+  },
+  "detectors": [],
+  "skills": [
+    {"name": "type_x", "type": "press", "key": "x", "enabled": false},
+    {"name": "hold_space", "type": "hold", "key": "space", "seconds": 1.0, "enabled": false}
+  ],
+  "rules": [],
+  "planner": {"enabled": false}
+}
