@@ -16,7 +16,7 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-24)
+## Right now (2026-09-25)
 
 **v0.7 "Closed-loop planner" (Issue #61) is in progress** on
 `feature/v0.7-closed-loop-planner`, branched from `main` at the v0.6.0 release.
@@ -34,8 +34,18 @@ safety-reviewer PASS WITH NOTES, and its findings were fixed: auto is re-checked
 after its confirmation dialog so F8 pressed meanwhile wins, auto steps run only
 in the window auto was confirmed for, auto click skills need that window in the
 foreground, proposals older than the TTL are never shown, and a step re-checks
-the planner generation) are done. The user approved the
-design on 2026-09-24:
+the planner generation; PR #68) are done. Task 6, the live Notepad smoke test
+with Ollama `qwen3.5:9b`, passed all 9 acceptance criteria on 2026-09-25
+(details in `docs/PLAN.md` "Smoke test results"):
+- Approve typed exactly one "x";
+- Reject and the 10 s expiry both worked;
+- no Ollama call ran while a proposal was pending;
+- auto stopped at its cap of 3;
+- BLOCKED ×3 turned auto off;
+- F8 stopped everything;
+- `goal` / `auto_max_steps` survived a Save/Load.
+
+The user approved the design on 2026-09-24:
 - the LLM proposes `run_skill` with a skill name only;
 - approve-each-step is the default, and auto mode is opt-in with a step cap and
   auto-off triggers;
@@ -319,10 +329,11 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 task 6: the live Windows smoke test on Notepad with Ollama `qwen3.5:9b`,
-in both approve and auto mode, against the acceptance criteria in
-`docs/PLAN.md`. Only Notepad may receive input; never interact with any game
-that happens to be running.
+v0.7 task R, the release close-out:
+- CHANGELOG, README, ROADMAP, ARCHITECTURE and AGENTS;
+- `APP_VERSION = "0.7.0"` and the `setup.ps1` / `check_system.ps1` banners;
+- then PR #63 feature→`main` as a merge commit, which closes Issue #61.
+
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
 
@@ -368,6 +379,14 @@ and Issue #4 are all completed and closed.
 - A PR that merges `main` into an integration branch must land as a merge
   commit, not a squash. Otherwise `main` is not an ancestor, and the release PR
   hits the same conflicts again.
+- Live GUI smoke tests driven by Claude desktop's computer use: the Claude
+  window is a full-screen topmost layered overlay, so mouse clicks sometimes
+  land on it instead of the Tk app. Button clicks are unreliable there; a press
+  on an entry or combobox usually works. Keys always go to the foreground
+  window. Drive the app with Tab / Shift+Tab and Space, and check the focus
+  ring with a zoom before pressing Space. Remember that Approve and the auto
+  confirmation focus the game window. After them, keys go to the game until
+  the app is focused again.
 
 ## Longer-term plan
 
