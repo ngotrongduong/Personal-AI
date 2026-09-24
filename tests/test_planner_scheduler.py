@@ -5,8 +5,8 @@ import time
 import unittest
 
 from agent.game_state import GameState
-from agent.llm_planner import PlannerCancelledError
-from agent.planner_scheduler import PlannerScheduler
+from agent.llm_planner import PlannerCancelledError, PlannerOutcome
+from agent.planner_scheduler import PlannerCycleReport, PlannerScheduler
 
 
 class FakePlanner:
@@ -65,10 +65,84 @@ class PlannerSchedulerTests(unittest.TestCase):
         for scheduler in self.schedulers:
             scheduler.stop()
 
-    def _scheduler(self, planner: FakePlanner, *, interval_seconds: float = 0.02) -> PlannerScheduler:
-        scheduler = PlannerScheduler(planner, self.state, interval_seconds=interval_seconds)
+    def _scheduler(
+        self,
+        planner: FakePlanner,
+        *,
+        interval_seconds: float = 0.02,
+        on_cycle=None,
+    ) -> PlannerScheduler:
+        scheduler = PlannerScheduler(
+            planner, self.state, interval_seconds=interval_seconds, on_cycle=on_cycle
+        )
         self.schedulers.append(scheduler)
         return scheduler
+
+    def _collect_reports(self, planner: FakePlanner, expected: int) -> list[PlannerCycleReport]:
+        reports: list[PlannerCycleReport] = []
+        received = threading.Event()
+
+        def on_cycle(report: PlannerCycleReport) -> None:
+            reports.append(report)
+            if len(reports) >= expected:
+                received.set()
+
+        scheduler = self._scheduler(planner, on_cycle=on_cycle)
+        with self.assertLogs("agent.planner_scheduler", level="INFO"):
+            before = time.time()
+            self.assertTrue(scheduler.start())
+            self.assertTrue(received.wait(timeout=1.0))
+            scheduler.stop()
+            after = time.time()
+
+        for report in reports:
+            self.assertGreaterEqual(report.duration_seconds, 0.0)
+            self.assertLess(report.duration_seconds, 1.0)
+            self.assertTrue(before <= report.finished_at <= after)
+        return reports
+
+    def test_reports_successful_cycle_outcome_to_callback(self) -> None:
+        planner = FakePlanner(outcome=PlannerOutcome("enabled rule 'click_collect'", changed=True))
+
+        report = self._collect_reports(planner, 1)[0]
+
+        self.assertEqual(report.status, "ok")
+        self.assertEqual(report.message, "enabled rule 'click_collect'")
+        self.assertIs(report.changed, True)
+
+    def test_reports_cancelled_cycle_to_callback(self) -> None:
+        planner = FakePlanner(raise_cancelled_error=True)
+
+        report = self._collect_reports(planner, 1)[0]
+
+        self.assertEqual(report.status, "cancelled")
+        self.assertEqual(report.message, "discarded after stop")
+        self.assertIsNone(report.changed)
+
+    def test_reports_failed_cycle_to_callback(self) -> None:
+        planner = FakePlanner(fail_first_call=True)
+
+        reports = self._collect_reports(planner, 2)
+
+        self.assertEqual(reports[0].status, "error")
+        self.assertIn("planned test failure", reports[0].message)
+        self.assertIsNone(reports[0].changed)
+        self.assertEqual(reports[1].status, "ok")
+
+    def test_raising_callback_does_not_stop_later_cycles(self) -> None:
+        planner = FakePlanner()
+
+        def on_cycle(_report: PlannerCycleReport) -> None:
+            raise RuntimeError("callback failure")
+
+        scheduler = self._scheduler(planner, on_cycle=on_cycle)
+        with self.assertLogs("agent.planner_scheduler", level="ERROR") as logs:
+            self.assertTrue(scheduler.start())
+            self.assertTrue(planner.wait_for_calls(3).wait(timeout=1.0))
+            scheduler.stop()
+
+        self.assertTrue(any("Planner cycle callback failed" in message for message in logs.output))
+        self.assertFalse(scheduler.is_running)
 
     def test_calls_planner_repeatedly_on_its_configured_cadence(self) -> None:
         planner = FakePlanner()

@@ -2,6 +2,11 @@
 
 All notable project changes are tracked here.
 
+## Unreleased — v0.4 Local AI Planner (in progress)
+
+- Planner (Ollama) panel shows the last planner cycle: time, latency, status
+  and directive/outcome. Display-only; stale reports after stop/F8 are dropped.
+
 ## v0.2.0 — Vision baseline
 
 - Added live DXcam capture of a selected Windows application.
