@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- No integration branch is active: v0.6.0 (`feature/v0.6-profiles-skills`, Issue #50) is released into `main`. The next milestone (v0.7) starts its own `feature/*` branch from `main`.
+- Active integration branch: `feature/v0.7-closed-loop-planner` (Issue #61). Sub-task PRs target it; it merges into `main` as a merge commit at release.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,10 +94,20 @@ feature/<milestone>
 
 ## Current priority
 
-v0.6 "Game Profiles + Skills" (Issue #50) on `feature/v0.6-profiles-skills`.
-It is the first step toward v1.0: v0.6 profiles + skills, then v0.7 a planner
-that picks skills, then v0.8 memory, then v1.0. Read `docs/PLAN.md`'s design
-constraint section before implementing anything here.
+v0.7 "Closed-loop planner" (Issue #61) on `feature/v0.7-closed-loop-planner`.
+It is the second step toward v1.0: v0.6 profiles + skills (released), then v0.7
+a planner that picks skills, then v0.8 memory, then v1.0. Read `docs/PLAN.md`'s
+design constraint section before implementing anything here.
+
+Planner invariant (permanent, from v0.7):
+- The LLM directive `run_skill` carries only a skill *name* and a display-only
+  reason, and the skill must be enabled.
+- Only the Tk thread submits a planner step to the `SkillExecutor`, after
+  rebuilding the intent from fresh state. The planner thread only posts
+  proposals to a single-slot mailbox.
+- Approve-each-step is the default. Auto mode is opt-in, never persisted,
+  step-capped (hard cap 100), and turns off on F8, input off, profile load,
+  Clear Rules, planner off, or 3 failed steps in a row.
 
 Skill invariant (permanent, from v0.6):
 - `ActionDispatcher` is the only path from a skill to `InputController`.

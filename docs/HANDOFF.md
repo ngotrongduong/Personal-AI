@@ -18,10 +18,22 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-24)
 
+**v0.7 "Closed-loop planner" (Issue #61) is in progress** on
+`feature/v0.7-closed-loop-planner`, branched from `main` at the v0.6.0 release.
+Task 0 (kickoff: issue, branch, `docs/PLAN.md` spec, `AGENTS.md` planner
+invariant, draft PR feature→`main`) is done. The user approved the
+design on 2026-09-24:
+- the LLM proposes `run_skill` with a skill name only;
+- approve-each-step is the default, and auto mode is opt-in with a step cap and
+  auto-off triggers;
+- a Goal field is saved as `planner.goal`;
+- v0.4 rule toggles are kept and still apply directly.
+
+Codex's CLI is out of quota until 2026-09-25 13:55, so Claude implements.
+
 **v0.6.0 "Game Profiles + Skills" (Issue #50) is released.** The
 integration branch `feature/v0.6-profiles-skills` merged into `main` via PR #52
-as a merge commit. Next is v0.7, the closed-loop planner, which needs its own
-kickoff (issue, `feature/*` branch, `docs/PLAN.md`).
+as a merge commit (`f1cc71c`).
 The user chose to move toward v1.0 in steps:
 - v0.6 profiles + skills, no LLM;
 - v0.7 a closed-loop planner that picks skill *names* only, approve-each-step
@@ -294,10 +306,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 kickoff: the closed-loop planner, where the LLM picks a skill *name* from
-the loaded profile, each step is approved by default, and an explicit opt-in
-auto mode exists. See `docs/ROADMAP.md`. Never commit a recording, a profile template PNG or any
-other user data, because the repo is public.
+v0.7 task 1: the `run_skill` directive, the closed-loop prompt,
+`agent/step_history.py` and `agent/proposal_mailbox.py` (see `docs/PLAN.md`).
+Never commit a recording, a profile template PNG or any other user data,
+because the repo is public.
 
 Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set
 implicitly by importing `dxcam`. Calling `SetProcessDpiAwareness(2)` explicitly
@@ -332,7 +344,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-None. Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3)
+Issue #61 (v0.7) is open. Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3)
 and Issue #4 are all completed and closed.
 
 ## Lessons

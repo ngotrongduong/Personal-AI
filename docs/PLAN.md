@@ -1,183 +1,244 @@
-# v0.6 detailed plan — Game Profiles + Skills
+# v0.7 detailed plan — Closed-loop planner
 
-Granular checklist for the current milestone (GitHub Issue #50), with status
+Granular checklist for the current milestone (GitHub Issue #61), with status
 and owner, so progress can be checked without opening GitHub. This is the same
-checklist as Issue #50 — **keep them in sync**: when you tick something here,
-tick/comment it there too (and vice versa), same commit/timeframe as the work.
+checklist as Issue #61. **Keep them in sync:** when you tick something here,
+tick or comment it there too, in the same commit or timeframe as the work.
 
-For "what's the current PR/branch situation right now," see `docs/HANDOFF.md`
-instead — that one changes faster than this file should.
+For the current PR and branch situation, see `docs/HANDOFF.md` instead. That
+file changes faster than this one should.
 
-Earlier versions of this file (v0.4 Local AI Planner, v0.5 Demonstration
-recording) are preserved in git history on `main`; see `docs/ROADMAP.md`'s
-Completed section for the summaries.
+Earlier versions of this file are preserved in git history on `main`:
+- v0.4 Local AI Planner;
+- v0.5 Demonstration recording;
+- v0.6 Game Profiles + Skills.
+
+`docs/ROADMAP.md`'s Completed section summarizes them.
 
 ## Goal
 
-First step toward v1.0 (vision → state → plan → action → observation). Road to
-v1.0, one spec and one release per step:
+This is the second step toward v1.0 (vision → state → plan → action →
+observation). The road to v1.0 has one spec and one release per step:
 
-- **v0.6 Profiles + Skills (this milestone, no LLM)**;
-- v0.7 closed-loop planner that picks skills (approve-each-step by default,
-  explicit opt-in auto mode with rate limit and action budget);
-- v0.8 session memory (structured JSONL log plus bounded, user-editable notes
-  written by the LLM);
-- v1.0 integration, permissions panel, long smoke test.
+- v0.6 Profiles + Skills (released, Issue #50);
+- **v0.7 closed-loop planner that picks skills (this milestone)**;
+- v0.8 session memory: a structured JSONL log plus bounded, user-editable
+  notes written by the LLM;
+- v1.0 integration, a permissions panel, and a long smoke test.
 
-v0.6 delivers:
-- runtime-loadable **game profiles** (`profiles/<name>/profile.json` plus
-  template PNGs), saved from the UI and then hand-edited as JSON;
-- **skills** (`click` / `press` / `hold`) with per-profile **permissions**;
-- rules that fire skills;
-- a Skills panel where the user runs a skill manually.
+v0.7 delivers:
+- The Ollama planner can propose running one skill from the loaded profile, by
+  **name only**.
+- **Approve-each-step** is the default mode. Each proposal is shown in the
+  Planner panel with Approve / Reject buttons.
+- **Auto mode** is an explicit opt-in. Proposals then run without a click,
+  inside a step budget and automatic stop conditions.
+- **Closed loop:** each prompt carries the goal, the current observations, the
+  enabled skills, the rules and the outcomes of the last steps.
+- A **Goal** field in the Planner panel is saved in the profile.
 
 User decisions (2026-09-24):
-- From v0.7 the LLM only picks a **skill name** defined by the profile.
-  Coordinates, keys and durations always come from the profile, and all input
-  goes through `ActionDispatcher`.
-- Skills cover clicks and keys. No specific game yet; smoke tests use Notepad.
-- Profiles are created with "Save Profile" in the UI and then edited by hand.
+- The LLM only picks a **skill name** defined by the profile. Coordinates, keys
+  and durations always come from the profile, and all input goes through
+  `ActionDispatcher`.
+- The goal comes from a UI field and is stored as `planner.goal` in the
+  profile. Load fills the field, and Save writes it.
+- The v0.4 `enable_rule` / `disable_rule` directives are kept and still apply
+  directly, because they send no input. Only `run_skill` needs approval.
+- Auto mode has a step cap. It also turns itself off on events and after
+  repeated failures.
 
 ## Design constraint (read before implementing anything)
 
-1. `ActionDispatcher` stays the **only** bridge to `InputController`. The
-   existing gates keep their order: input enabled → supported action → fresh
-   intent → target resolvable.
-2. Keys are validated **twice**: the profile loader rejects bad profiles, and
-   the dispatcher checks again at dispatch time.
-   - A key must be in the profile's `permissions.allowed_keys`.
-   - Forbidden in code, whatever the profile says: `f8`, `win` / `winleft` /
-     `winright`, `apps`, and any combo (no combos in v0.6).
-   - `hold.seconds` ≤ `permissions.max_hold_seconds` ≤ the hard cap of
-     **5.0 s**.
-3. Key skills (`press` / `hold`) dispatch **only while the captured window is
-   the foreground window**, otherwise they are BLOCKED, so keys never go to
-   another app. The manual Run button focuses the game first, as `test_w`
-   does.
-4. Global rate limit in the dispatcher (`permissions.max_actions_per_second`,
-   default 5). Only one skill runs at a time. While one is running, a new one
-   is rejected ("busy"), not queued.
-5. Every skill has an `enabled` flag that defaults to **off**. A disabled
-   skill never runs, whether fired by a rule or by Run. This is the
-   permission layer the v0.7 planner will use.
-6. F8 / window close: `input.set_enabled(False)` (releases held keys) → cancel
-   the running skill → stop the planner → stop recording.
-7. A profile can be loaded only while input control is **off**, so rules
-   cannot fire the moment it loads.
-8. `profiles/*` is gitignored except `profiles/example/profile.json`. The repo
-   is public: never commit template PNGs.
+1. **The LLM chooses a name, nothing else.** `run_skill` has exactly the
+   fields `type`, `skill` and `reason`. There is no field for a key,
+   coordinate, duration or detector. The skill must exist in the loaded
+   profile **and be enabled** when the directive is parsed. It is checked
+   again when it runs. `reason` is display and prompt text only; it is never
+   parsed for commands.
+2. **Only the Tk thread submits skills.**
+   - The planner thread puts a validated `SkillProposal` into a thread-safe
+     single-slot `ProposalMailbox`. The Tk loop (`_poll_preview`) takes it
+     from there.
+   - The Tk thread decides (approve / auto / reject / expire), rebuilds the
+     intent with `SkillBook.build_intent` from **fresh** state, and calls
+     `SkillExecutor.submit(..., source="planner")`.
+   - The planner never holds a handle to the executor, the dispatcher or
+     `InputController`.
+3. **Re-checks on execution:**
+   - input control is on;
+   - the skill still exists and is enabled;
+   - the proposal has not expired;
+   - the executor is idle;
+   - `build_intent` succeeds (a click needs a fresh, confident detection).
 
-The v0.5 recording invariant is unchanged: `recording/` only listens, and
-recording and input control stay mutually exclusive.
+   Every dispatcher gate stays unchanged: allowlist, foreground for keys, hold
+   cap, rate limit, busy. A proposal that fails a re-check is recorded as
+   `refused` and does not run.
+4. **One step at a time.**
+   - The mailbox holds at most one proposal. It stays occupied from the moment
+     a proposal is posted until the Tk thread resolves it: rejected, expired,
+     refused, or the skill's result drained.
+   - The scheduler skips its LLM call (no Ollama request) while the mailbox is
+     occupied or the executor is busy.
+   - In approve mode, a proposal expires after **10 s**.
+5. **Auto mode is opt-in and bounded.**
+   - The mode is **never persisted**. Every app start, profile load and F8
+     returns to approve mode.
+   - Turning auto on requires input control to be on and a confirmation
+     dialog.
+   - Auto turns itself off:
+     - after `planner.auto_max_steps` executed steps (default 20, hard cap
+       **100**);
+     - after **3** consecutive refused, BLOCKED or failed steps;
+     - on F8;
+     - when input control is turned off;
+     - on profile load;
+     - on Clear Rules;
+     - when the planner is disabled.
+6. **F8 / window close:** `input.set_enabled(False)` (releases held keys) →
+   `executor.cancel()` → stop the planner, drop any pending proposal and turn
+   auto off → stop recording. The ordering is unchanged from v0.6.
+7. **Stale work is discarded.**
+   - Each planner start gets a new generation.
+   - A proposal posted after `stop()` raises `PlannerCancelledError`, the same
+     pattern as the v0.4 `_CancellableRuleControl`.
+   - The Tk thread drops any proposal from an older generation.
+8. The v0.4, v0.5 and v0.6 invariants still hold. `recording/` only listens.
+   Recording and input control stay mutually exclusive. Skills are disabled by
+   default. A profile loads only while input control is off. `profiles/*` is
+   gitignored except `profiles/example/profile.json`.
 
-## Profile format
-
-`profiles/<name>/profile.json`, templates in `profiles/<name>/templates/*.png`:
+## Directive schema (`agent/llm_planner_schema.py`)
 
 ```json
-{
-  "format_version": 1,
-  "name": "Notepad demo",
-  "permissions": {"allowed_keys": ["x", "space"], "max_hold_seconds": 1.5,
-                  "max_actions_per_second": 5},
-  "detectors": [{"name": "ok_button", "template": "templates/ok_button.png",
-                 "threshold": 0.9, "roi": null}],
-  "skills": [
-    {"name": "press_ok", "type": "click", "detector": "ok_button", "min_confidence": 0.9, "enabled": false},
-    {"name": "type_x", "type": "press", "key": "x", "enabled": false},
-    {"name": "hold_space", "type": "hold", "key": "space", "seconds": 1.0, "enabled": false}
-  ],
-  "rules": [{"name": "auto_ok", "detector": "ok_button", "skill": "press_ok",
-             "min_confidence": 0.9, "cooldown_seconds": 1.0, "enabled": true}],
-  "planner": {"enabled": false, "model": "qwen3.5:9b", "interval_seconds": 5.0}
-}
+{"type": "run_skill", "skill": "<an enabled skill name>", "reason": "<1-200 chars>"}
+{"type": "enable_rule", "rule_name": "<rule name>"}
+{"type": "disable_rule", "rule_name": "<rule name>"}
+{"type": "noop"}
 ```
 
-Strict validation:
-- Reject unknown keys, duplicate names, and any `format_version` other than 1.
-- Every detector and skill reference must resolve.
-- Template paths must stay **inside** the profile folder: no `..` and no
-  absolute paths.
-- A missing template file gives a clear error.
-- The `planner` block reuses `load_planner_config` (`agent/planner_config.py`).
+`parse_directive(raw, known_rule_names, runnable_skill_names=())` accepts
+`run_skill` under these conditions:
+- the fields are exactly `type`, `skill` and `reason`;
+- `skill` is a non-empty string in `runnable_skill_names`;
+- `reason` is a string that is 1–200 characters after stripping;
+- control characters are replaced with spaces.
+
+Every other shape is still rejected.
+
+## Prompt (closed loop)
+
+1. The instruction, plus the **goal**, or "(no goal set)".
+2. The game state observations, in the v0.4 format.
+3. The runnable skills, one line each: name, type, and detector (click) or key
+   (press/hold). Only enabled skills are listed.
+4. The rules and whether each is enabled.
+5. The **last 5 steps**, oldest first. Each line gives the skill, the
+   decision (approved / auto / rejected / expired / refused), the outcome
+   message, and the age in seconds, or "none yet".
+6. The four exact JSON shapes and the "only these keys" line.
+
+## Profile additions (`planner` block)
+
+```json
+"planner": {"enabled": false, "model": "qwen3.5:9b", "interval_seconds": 5.0,
+            "goal": "Type an x whenever the status bar is visible.",
+            "auto_max_steps": 20}
+```
+
+- `goal`: a string of at most 500 characters. Default "".
+- `auto_max_steps`: an int from 1 to 100. Default 20. `bool` is rejected.
+- `save_profile` writes both fields. `load_planner_config` validates them, and
+  `PlannerConfig` carries them.
 
 ## Components
 
-- `agent/skills.py` (new, pure):
-  - `ClickSkill` / `PressSkill` / `HoldSkill`;
-  - `SkillPermissions`, `FORBIDDEN_KEYS`, `HARD_MAX_HOLD_SECONDS`;
-  - skill → `ActionIntent`. A click needs a visible, fresh detection with
-    enough confidence.
-- `agent/rule_engine.py`:
-  - `ActionIntent` gains optional `skill_name`, `key` and `hold_seconds`,
-    with defaults so existing callers keep working;
-  - `VisibilityRule` gains an optional `skill`.
-- `agent/profile.py` (new):
-  - `GameProfile`, `load_profile`, `save_profile` (never overwrites an
-    existing profile without confirmation), `list_profiles`;
-  - detectors are registered with `DetectorRegistry.register_file`.
-- `agent/action_dispatcher.py`:
-  - `press` / `hold` added to the supported actions;
-  - allowlist and hold-cap re-check, foreground check (injectable), rate
-    limit;
-  - `hold` is `key_down`, then wait on a cancel event, then `key_up` in
-    `finally`.
-- `agent/skill_executor.py` (new):
-  - one worker thread; `submit` is rejected while busy; `cancel()` for F8;
-  - results go to a `SimpleQueue` that `_poll_preview` drains, the same
-    pattern as the v0.5 Recording panel.
-- `main.py`:
-  - Profile panel: profile list, Load, Save Profile, status.
-  - Skills panel: one row per skill with an Enabled checkbox, a Run button
-    and the last result.
-  - F8 / close wiring.
-- `profiles/example/profile.json`: press/hold skills only (no detectors, so
-  no PNG), for the Notepad smoke test.
+- `agent/llm_planner_schema.py`: `RunSkillDirective(skill_name, reason)`, and
+  `parse_directive` gains `runnable_skill_names`.
+- `agent/step_history.py` (new, pure, thread-safe):
+  - `StepRecord(skill_name, reason, decision, outcome, ok, finished_at)`;
+  - `StepHistory(maxlen=5)` with `append`, `recent()`, `clear()` and
+    `prompt_lines(now)`.
+- `agent/llm_planner.py`:
+  - `LlmPlanner(client, rule_control, *, skills=None, history=None,
+    goal="", proposals=None)`.
+  - `skills` is a read-only catalog (`runnable_skills()` → name/type/detail).
+  - `proposals` is a sink whose `post(SkillProposal) -> bool` is False when
+    the mailbox is full.
+  - `run_skill` becomes `PlannerOutcome("proposed <skill>: <reason>")`, or
+    "dropped" when the mailbox is full.
+- `agent/proposal_mailbox.py` (new, pure, thread-safe):
+  - `SkillProposal(skill_name, reason, created_at, generation)`;
+  - `ProposalMailbox` with `post`, `take`, `release`, `occupied`, `clear`.
+- `agent/autopilot.py` (new, pure, Tk-thread only): the state machine.
+  - `mode` is `approve` or `auto`.
+  - `offer(proposal, now)` returns `AWAIT` / `EXECUTE`.
+  - `approve(now)`, `reject()` and `expire(now)` resolve a pending proposal.
+  - `record_result(ok)` returns an auto-off reason when 3 failures come in a
+    row.
+  - Also `arm_auto(max_steps)`, `disarm(reason)`, `steps_taken`.
+- `agent/planner_scheduler.py`: an optional `should_plan: Callable[[], bool]`
+  gate. When it returns False, the cycle is skipped without calling the
+  planner and nothing is reported.
+- `agent/planner_controller.py`: `start(..., skills=, history=, goal=,
+  mailbox=, should_plan=)` wires a cancellable proposal sink (a new
+  generation per start). `stop()` cancels it.
+- `agent/planner_config.py` / `agent/profile.py`: `goal`, `auto_max_steps`.
+- `main.py`, Planner panel:
+  - a Goal entry;
+  - a mode radio (Approve each step / Auto), plus an auto step counter;
+  - a proposal line with Approve / Reject buttons;
+  - planner cycle reports and log lines now go through a `SimpleQueue`
+    drained in `_poll_preview` instead of `root.after` from the scheduler
+    thread (closes a v0.4 follow-up).
 
 ## Checklist
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | Done | Claude | Issue #50, `feature/v0.6-profiles-skills` from `main`, this file, `AGENTS.md`/`docs/HANDOFF.md`/`docs/ROADMAP.md` updated, `profiles/*` gitignored except `profiles/example/`, draft PR feature→`main`. |
-| 1 | `agent/skills.py` + `ActionIntent`/`VisibilityRule` extensions | Done (#53) | Claude | `validate_key`: one lowercase key name matching `[a-z0-9]{1,16}` or a single punctuation key. That rules out combos (`+`, spaces) and uppercase, and `FORBIDDEN_KEYS` (`f8`, `win`/`winleft`/`winright`/`lwin`/`rwin`, `apps`) are always rejected. `SkillPermissions(allowed_keys: frozenset, max_hold_seconds ≤ 5.0, max_actions_per_second ≤ 20)`, with `key_denial`/`hold_denial` for the dispatcher to re-check. Frozen `ClickSkill`/`PressSkill`/`HoldSkill` validate their own fields; `enabled` defaults to False and must be a real bool. `SkillBook(skills, permissions)` rejects duplicate or unpermitted skills, holds runtime enable flags behind a lock, and `build_intent(name, state, source=, now=)` returns a `SkillIntentResult` (intent, or the reason: unknown / disabled / not permitted / click detection missing, hidden, weak, stale or without a bbox). `ActionIntent` gains `skill_name`/`key`/`hold_seconds` (defaults None). `VisibilityRule` gains `skill`, which must be set exactly when `action == SKILL_RULE_ACTION` (`"skill"`), and `RuleEngine` copies it into the intent. `tests/test_skills.py`. 291 passed, 1 skipped. |
-| 2 | `agent/profile.py` load/save/list + `profiles/example/profile.json` | Done (#54) | Claude (Codex out of quota until 2026-09-25 13:55) | `load_profile(dir, registry=None)` / `parse_profile` reject unknown fields at every level, `format_version` other than int 1, duplicate names, dangling detector/skill references, template paths that are absolute, contain `..`, resolve outside the folder, are not `.png` or do not exist, and any skill the permissions forbid (built through `SkillBook`). Rules become `VisibilityRule(action="skill")` plus an `enabled` flag; `planner` goes through `load_planner_config`. Detectors are registered only after full validation, and a failed registration unregisters what this call added. `save_profile(root, name, detectors=[(DetectorDefinition, bgr)], skills, rules, permissions, planner, overwrite=False)` validates everything first, writes to a slug folder (`[a-z0-9_-]`, max 64), refuses an existing folder unless `overwrite=True`, and never deletes files. `list_profiles(root)`. `GameProfile.skill_book()` / `rule_engine()`. `tests/test_profile.py`. 313 passed, 1 skipped. |
-| 3 | Dispatcher press/hold + foreground + allowlist + rate limit | Done (#55) | Claude (Codex out of quota), safety-reviewer | `ActionDispatcher(..., permissions_provider=, foreground_checker=is_foreground, known_keys=pydirectinput.KEYBOARD_MAPPING)`. `SUPPORTED_ACTIONS = {click, press, hold}`; `"skill"` is never directly dispatchable. Key gates, after the unchanged enabled → supported → fresh checks: window selected → permissions loaded (none, or a provider error, blocks) → `key_denial` → key known to pydirectinput → `hold_denial` (hold only; a press carrying `hold_seconds` is rejected) → target window is foreground (checker error blocks). Click keeps its bbox/region gates and does not need the foreground. Sliding-window rate limit from `max_actions_per_second` (fractional rates use a longer window), shared by clicks only while permissions are loaded; the slot is reserved under a lock and released if the input call fails, and rejected attempts use no slot. While a press or hold runs (`busy`), every dispatch is rejected as busy. `press` = `tap_key(key, PRESS_SECONDS)`. `hold` = `key_down` → wait on the cancel event in 50 ms slices, also ending when input is disabled (F8) or the window loses the foreground → `key_up` in `finally` (a `key_up` error is reported, not raised; a failed `key_down` still sends `key_up` unless InputController refused it because input is off). A cancel event that is already set rejects the action before any key goes down. `cancel()` from any thread only ends a running action; `dispatch(cancel_event=)` is for the executor. The lock is never held while waiting. `core.window_utils.is_foreground` (a null handle is never foreground). Safety-reviewer: no blockers; fixed foreground re-check during a hold, null hwnd, pre-set cancel, press counted as busy, deque growth without permissions. Modifier keys (`shift`/`ctrl`/`alt`) stay allowed when listed in `allowed_keys` (games use them); the foreground re-check stops a held modifier from leaking into another app. **Carry into tasks 4/6:** a hold blocks its caller for up to 5 s, so skills must run on the executor's worker thread, never the Tk thread, and the F8 listener must call `input.set_enabled(False)` and `executor.cancel()` directly (both thread-safe) before scheduling the UI part with `root.after`. `tests/test_action_dispatcher_keys.py` (fake input/foreground/keys, threads with join timeouts, a real `InputController` disable race, `is_foreground`). 355 passed, 1 skipped. |
-| 4 | `agent/skill_executor.py` | Done (#56) | Claude (Codex out of quota), safety-reviewer | `SkillExecutor(dispatcher)` runs each intent through `ActionDispatcher.dispatch(intent, hwnd=, cancel_event=)` on a fresh daemon `skill-executor` thread, one at a time. `submit(intent, hwnd=, source="manual")` never blocks and returns None or why it did not start: busy (rejected, never queued) or shut down. `cancel()` is safe from any thread: it sets the run's own cancel event, so a cancel before the worker reaches the dispatcher sends no key, and calls `dispatcher.cancel()`. Each run gets a fresh event. Results are `SkillRun(source, result, finished_at)` on a `queue.SimpleQueue`, drained by the Tk loop with `drain()`, and are queued before `busy` clears. A dispatch exception becomes a rejected result. `shutdown(join_timeout=1.0)` refuses new skills, cancels and joins; it does not touch input, so callers disable input first (F8 order). `tests/test_skill_executor.py` (a blocking fake dispatcher, plus the real dispatcher over fake input: F8 order releases a held key quickly). Safety-review fixes: a cancel before the worker reaches the dispatcher now also stops a **click** (`_run` checks the event first and `_dispatch_click` checks `cancel_event` after admission, freeing the rate slot); a failed `thread.start()` no longer leaves the executor stuck busy; new tests for cancel-before-dispatch (press/hold/click, input still on), concurrent submits, shutdown idle/timeout/from the worker; hold tests use 5 s so CI timing has slack. |
-| 5 | UI Profile panel (Load/Save) | Done (#57) | Claude | Profile panel in `main.py`: combobox of `profiles/*` folders (`list_profiles`), Refresh, Load Profile, Save Profile…, status line. **Load** is refused while input control is on; it builds a fresh `DetectorRegistry` from `read_templates` (new in `agent/profile.py`), the profile's `RuleEngine` and `SkillBook` first, so a bad profile changes nothing, then stops the planner and swaps registry, rules, skills and profile, clearing `GameState`. The dispatcher's `permissions_provider` reads the loaded profile's permissions, so with no profile no key can be sent. **Save** asks for a name (`profile_slug` folder), asks before writing into an existing folder (files replaced, never deleted), and writes every detector whose template the app kept (`_selection_release` now keeps it) plus rules via `collect_profile_contents`: a UI click rule becomes a skill rule firing a **disabled** click skill (`click_<detector>`), the loaded profile's skills and permissions are kept, rules without a saved detector or skill are skipped and logged. Vision can be enabled with profile detectors only. Skill rules still dispatch as "skill" and are rejected until task 6. `tests/test_main_profile_panel.py`. |
-| 6 | UI Skills panel + rule→skill + F8 wiring | Done (#58) | Claude | Skills panel in `main.py`: one row per skill of the loaded profile (Enabled checkbox, Run button, last result). **Run** needs input control on and an idle executor; a click skill needs Capture running; the intent is pre-checked with `SkillBook.build_intent` *before* the game window is focused, rebuilt after focus, then submitted to the `SkillExecutor` (never run on the Tk thread). Skill rules go through the executor too (`_submit_rule_skill`); UI click rules still dispatch directly and the dispatcher's busy gate refuses them while a skill holds a key. Results are drained in `_poll_preview`. Unticking the running skill cancels it. **Stopping:** turning input control off, `emergency_stop` and the F8 listener call `input.set_enabled(False)` then `executor.cancel()` (the F8 listener does both directly in the pynput thread before scheduling `emergency_stop`); `close` shuts the executor down. Load is refused while a skill is still stopping, and old results are drained before the swap. Safety-reviewer pass done; tests patch `pydirectinput` as a safety net. `tests/test_main_skills_panel.py`. |
-| 7 | Live Windows smoke test | Done (2026-09-24) | Claude | Passed on a throwaway Notepad window (Windows 11), using gitignored smoke profiles only. `profiles/example` loaded with both skills off, and Run on a disabled skill was BLOCKED. Load while input control was on was refused. With input on, Run `type_x` focused Notepad and typed "x", and `hold_space` held for 1.02 s. **F8 inside the real pynput hook during a hold** released the key at once ("Held 'space' for 0.23s (cancelled)"), unticked input control and stopped the planner. The loader rejected `f8` in `allowed_keys` ("reserved") and a skill key outside `allowed_keys`. Save Profile wrote a folder that loaded back with its skills disabled. A profile detector on Notepad's status bar was FOUND (1.00). Its **click skill rule** clicked it ("DONE: Clicked (1114, 1560)"), and F8 stopped the rule. Its **key skill rule** was BLOCKED while the app, not Notepad, was foreground ("Target window is not the foreground window; key blocked"). Fixes from the run: the Profile status line now says "enabled in file", because the Skills line shows runtime toggles. Notes: synthetic `hold` produces one key-down without auto-repeat, which is expected. The template-vision checkbox is toggled on by Load when the profile has detectors, so clicking it afterwards turns vision off. |
-| R | Release close-out (v0.6.0) | Done (2026-09-24) | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.6.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**; closes Issue #50. |
+| 0 | Kickoff | Done | Claude | Issue #61, `feature/v0.7-closed-loop-planner` from `main`, this file, `AGENTS.md` / `docs/HANDOFF.md`, draft PR feature→`main`. |
+| 1 | `run_skill` directive + closed-loop prompt + `agent/step_history.py` + `agent/proposal_mailbox.py` | Todo | Claude (Codex out of quota until 2026-09-25 13:55) | Pure tests: schema accept/reject (extra fields, disabled/unknown skill, reason length/type, control chars), prompt contents (goal, only enabled skills, history lines), mailbox single-slot/thread safety, history ring buffer. Fails closed on every error path. |
+| 2 | `agent/autopilot.py` | Todo | Claude | Pure tests: approve/reject/expire, auto execute and step cap, 3 consecutive failures, disarm reasons, a second offer while pending is dropped. |
+| 3 | Scheduler gate + controller wiring | Todo | Claude, safety-reviewer | `should_plan` skip (no planner call), cancellable proposal sink (post after stop raises `PlannerCancelledError`), generation per start. |
+| 4 | Profile `planner.goal` / `planner.auto_max_steps` | Todo | Claude | Loader validation, save round-trip, `PlannerConfig` fields. |
+| 5 | UI Planner panel + executor + F8 wiring | Todo | Claude, safety-reviewer | Tk tests like `tests/test_main_skills_panel.py`: approve runs through the executor, reject/expire release the mailbox, auto needs input on and a confirmation, the auto-off triggers, F8 order, stale generation dropped, planner reports via queue. |
+| 6 | Live Windows smoke test | Todo | Claude | See the acceptance criteria. |
+| R | Release close-out (v0.7.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #61. |
 
-Order: 0 → 1, 2 → 3 → 4 → 5 → 6 → 7 → R.
-- Each task lands through a `codex/…` or `claude/…` sub-branch PR into
-  `feature/v0.6-profiles-skills`.
-- Codex prompts must say to run **no git commands** (see `docs/HANDOFF.md`
-  operational note). Claude branches, commits and pushes afterwards.
+Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
+- Each task lands through a `claude/…` or `codex/…` sub-branch PR into
+  `feature/v0.7-closed-loop-planner`.
+- Codex prompts must say to run **no git commands** (see the operational note
+  in `docs/HANDOFF.md`).
 
-## Acceptance criteria (task 7, live on Notepad)
+## Acceptance criteria (task 6, live on Notepad with Ollama `qwen3.5:9b`)
 
-1. Load `profiles/example`.
-2. Run on a disabled skill is blocked.
-3. With the skill and input control enabled, Run `type_x` types "x" into
-   Notepad.
-4. `hold_space` holds space for about 1 s, then releases it.
-5. F8 during a hold releases the key at once and turns input control off.
-6. A key rule is BLOCKED while Notepad is not the foreground window.
-7. A key outside the allowlist, or `f8`, in the JSON is rejected by the loader.
-8. Save Profile from a detector drawn on the preview, then Load it back: the
-   click rule works.
-9. Loading a profile while input control is on is refused.
-10. All v0.3–v0.5 safety invariants still hold (F8, input-enable gate,
-    dispatcher gates, planner closed vocabulary, recording only listens).
+1. Load `profiles/example` and set a goal. With the skills disabled, the
+   planner proposes no `run_skill`.
+2. Enable `type_x`, input control and the planner. A proposal appears with a
+   reason. Nothing is typed until **Approve**, and then Notepad gets "x".
+3. **Reject** releases the mailbox, and the next cycle can propose again. An
+   unanswered proposal expires after 10 s.
+4. While a proposal is pending, no Ollama request is made (checked in the
+   log).
+5. **Auto mode** needs input on and a confirmation. It runs steps by itself
+   and turns off at `auto_max_steps` (set low, e.g. 3, for the test).
+6. With auto on, taking Notepad out of the foreground gives BLOCKED steps, and
+   auto turns off after 3 in a row.
+7. F8 during auto releases input, cancels the skill, stops the planner, clears
+   the proposal and returns to approve mode.
+8. Save Profile writes `goal` / `auto_max_steps`, and Load restores them.
+9. All v0.3–v0.6 safety invariants still hold (F8, input-enable gate,
+   dispatcher gates, key allowlist/foreground, recording only listens).
 
-## Explicitly out of scope for v0.6
+## Explicitly out of scope for v0.7
 
-- LLM skill choice and approval/auto modes (v0.7).
-- Logs and memory (v0.8).
-- Key combos, skill sequences, mouse move/drag.
-- A UI skill editor.
-- Auto-focusing the window when a rule fires: a key rule is simply BLOCKED if
-  the game is not the foreground window.
+- Multi-skill sequences or plans in one proposal.
+- Persistent logs and memory (v0.8).
+- The LLM enabling or disabling skills, or editing the profile.
+- Auto-focusing the game window for planner steps: a key step is simply
+  BLOCKED if the game is not foreground.
 - Anti-cheat bypassing, protected-process evasion, memory injection, packet
-  manipulation, credential theft, or stealth/persistence behavior — standing
-  invariant from `AGENTS.md`.
+  manipulation, credential theft, or stealth/persistence behavior. This is a
+  standing invariant from `AGENTS.md`.
