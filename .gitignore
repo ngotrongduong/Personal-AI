@@ -11,6 +11,11 @@ recordings/*
 !snapshots/.gitkeep
 !templates/.gitkeep
 !recordings/.gitkeep
+# Runtime game profiles (v0.6+): only the example profile JSON is tracked
+profiles/*
+!profiles/example/
+profiles/example/*
+!profiles/example/profile.json
 # Datasets exported outside recordings/ (scripts/recordings.py export --out)
 dataset*.jsonl
 *.jsonl.tmp
