@@ -5,18 +5,32 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from .autopilot import DEFAULT_AUTO_MAX_STEPS, validate_auto_max_steps
+from .llm_planner import MAX_GOAL_LENGTH
 from .ollama_client import OllamaClientConfig
 
 
 @dataclass(frozen=True, slots=True)
 class PlannerConfig:
-    """Optional local-planner settings, disabled unless explicitly enabled."""
+    """Optional local-planner settings, disabled unless explicitly enabled.
+
+    ``goal`` is the free-text objective shown to the planner (v0.7).
+    ``auto_max_steps`` is the default step cap offered when the user arms auto
+    mode; auto mode itself is never stored.
+    """
 
     enabled: bool = False
     ollama: OllamaClientConfig | None = None
     interval_seconds: float = 5.0
+    goal: str = ""
+    auto_max_steps: int = DEFAULT_AUTO_MAX_STEPS
 
     def __post_init__(self) -> None:
+        if not isinstance(self.goal, str):
+            raise ValueError("goal must be a string.")
+        if len(self.goal) > MAX_GOAL_LENGTH:
+            raise ValueError(f"goal must be at most {MAX_GOAL_LENGTH} characters.")
+        validate_auto_max_steps(self.auto_max_steps)
         if (
             not isinstance(self.interval_seconds, (int, float))
             or isinstance(self.interval_seconds, bool)
@@ -44,6 +58,8 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         "port",
         "timeout_seconds",
         "interval_seconds",
+        "goal",
+        "auto_max_steps",
     }
     unknown_fields = set(planner) - recognized_fields
     if unknown_fields:
@@ -66,4 +82,6 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         enabled=enabled,
         ollama=ollama,
         interval_seconds=interval_seconds,
+        goal=planner.get("goal", ""),
+        auto_max_steps=planner.get("auto_max_steps", DEFAULT_AUTO_MAX_STEPS),
     )
