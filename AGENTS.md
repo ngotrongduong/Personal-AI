@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: `feature/v0.8-session-memory` (v0.8, Issue #71). Its sub-task PRs target that branch, and it merges into `main` as a merge commit at release.
+- Active integration branch: none. v0.8 (`feature/v0.8-session-memory`, Issue #71) merged into `main` as a merge commit at release; the next milestone opens its own `feature/<milestone>` branch.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,16 +94,15 @@ feature/<milestone>
 
 ## Current priority
 
-v0.8 "Session memory" (Issue #71, `feature/v0.8-session-memory`) is in
-progress. It is the third step toward v1.0:
+v0.8 "Session memory" (Issue #71) is released to `main`. It was the third
+step toward v1.0:
 - v0.6 profiles + skills (released);
 - v0.7 a planner that picks skills (released);
 - v0.8 a structured session log plus bounded, user-editable notes that the
-  LLM may add;
-- then v1.0.
+  LLM may add (released);
+- next: v1.0, to be scoped in its own issue and milestone branch.
 
-Read the design constraint section in `docs/PLAN.md` before implementing
-anything here.
+The invariants below stay in force for every later milestone.
 
 Memory invariant (permanent, from v0.8):
 - Memory never widens permissions. Notes and session logs are read only by

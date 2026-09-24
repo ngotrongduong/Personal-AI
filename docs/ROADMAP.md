@@ -88,10 +88,24 @@
 - Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`, including
   F8 during auto.
 
+### Stage 8 — Session memory (v0.8, Issue #71)
+- A structured JSONL log per planner session under
+  `memory/<profile>/sessions/`: cycles, steps with decision and outcome, auto
+  on/off, note changes and the end reason. Capped at 5 MB, never raises.
+- Bounded per-profile notes in `memory/<profile>/notes.json`, shown to the
+  planner as hints: at most 20, at most 10 from the LLM, 200 characters each.
+- The LLM may add a note with `remember` only when `planner.llm_notes` is on,
+  at most one per 30 s; it never edits or deletes a note.
+- A Memory panel to add, edit and delete notes, and `scripts/memory.py` to
+  list, show and validate memory files.
+- Memory never widens permissions.
+- Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`, including
+  F8 with an LLM call in flight.
+
 ## Next (toward v1.0)
 
-- v0.8 — session memory: a structured JSONL log plus bounded, user-editable
-  notes written by the LLM. Memory can never widen permissions.
+- v1.0 — tie the pieces together into one personal game agent; scope to be
+  planned in its own issue.
 - Imitation-learning experiments on recorded datasets remain a possible side
   track (offline training only; any replay goes through `ActionDispatcher`).
 

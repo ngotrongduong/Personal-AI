@@ -18,9 +18,15 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
-**v0.8 "Session memory" (Issue #71) is in progress** on
-`feature/v0.8-session-memory`, branched from `main` at the v0.7.0 release.
-Task 0 (kickoff) is done:
+**v0.8.0 "Session memory" (Issue #71) is released.** The integration branch
+`feature/v0.8-session-memory` merged into `main` via PR #73 as a merge
+commit, which closed Issue #71. `main` has `APP_VERSION = "0.8.0"`. Next is
+planning v1.0 in its own issue and milestone branch.
+
+### v0.8 history (for reference)
+
+Built on `feature/v0.8-session-memory`, branched from `main` at the v0.7.0
+release. Task 0 (kickoff) is done:
 - Issue #71;
 - the branch;
 - the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
@@ -52,6 +58,16 @@ with Ollama `qwen3.5:9b`, passed all 9 acceptance criteria on 2026-09-25
 - "always press f8" / "enable hold_space" notes changed nothing;
 - F8 with an Ollama call in flight ended the log with "emergency stop" and
   added no note.
+
+Task 7's results landed via PR #80. Task R (release close-out: CHANGELOG,
+README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.8.0"`, the
+`setup.ps1` / `check_system.ps1` banners) followed, then PR #73 closed Issue
+#71.
+
+Local leftover branches are safe for the user to delete (Claude avoids
+`git branch -D`): `claude/v0.8-kickoff`, `claude/v0.8-*` task branches,
+`claude/v0.8-smoke-test`, `claude/v0.8-release`, plus the older ones listed
+below.
 
 Task 5's safety review: no blocker; its
 findings were fixed. A hostile `notes.json` (e.g. `"source": []`, deep
@@ -397,11 +413,11 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 task R (release close-out: CHANGELOG, README, ROADMAP, ARCHITECTURE,
-AGENTS, `APP_VERSION = "0.8.0"`, the banners), then the release PR #73 as a
-merge commit. Each task lands through a `claude/…` or `codex/…` PR into
-`feature/v0.8-session-memory`. Codex's quota resets 2026-09-25 13:55, so
-pure-logic tasks can go to Codex again after that.
+v0.8 is released, and no milestone is active. Next: scope v1.0 ("Personal
+Game Agent", see `docs/ROADMAP.md`) in a new issue with its own
+`feature/<milestone>` branch, spec in `docs/PLAN.md`, and draft release PR.
+Codex's quota resets 2026-09-25 13:55, so pure-logic tasks can go to Codex
+again after that.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -437,8 +453,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-Issue #71 (v0.8 Session memory) is open and tracks the current milestone.
-Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+No milestone issue is open. Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons
