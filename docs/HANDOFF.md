@@ -27,7 +27,14 @@ directive, closed-loop prompt, `StepHistory`, `ProposalMailbox`) and task 2
 gate, cancellable proposal sink with a generation per start; `stop()` clears
 the mailbox; safety-reviewer passed) and task 4 (`planner.goal` /
 `planner.auto_max_steps` in `PlannerConfig`, the loader and `save_profile`)
-are done. The user approved the
+and task 5 (the UI Planner panel: Goal field, approve/auto mode, proposal line
+with Approve/Reject and a 10 s TTL, executor wiring, auto-off triggers, F8
+order, planner reports and logs through a queue drained in `_poll_preview`;
+safety-reviewer PASS WITH NOTES, and its findings were fixed: auto is re-checked
+after its confirmation dialog so F8 pressed meanwhile wins, auto steps run only
+in the window auto was confirmed for, auto click skills need that window in the
+foreground, proposals older than the TTL are never shown, and a step re-checks
+the planner generation) are done. The user approved the
 design on 2026-09-24:
 - the LLM proposes `run_skill` with a skill name only;
 - approve-each-step is the default, and auto mode is opt-in with a step cap and
@@ -312,12 +319,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 task 5: the UI Planner panel in `main.py` (Goal field, Approve/Auto mode,
-proposal line with Approve/Reject and TTL, auto step counter), executor wiring
-and the auto-off triggers (see `docs/PLAN.md`). The `should_plan` gate must
-stay thread-safe (mailbox/executor state only, never Tk variables), and the
-planner cycle report and log handler must move from `root.after` to a queue
-drained in `_poll_preview`.
+v0.7 task 6: the live Windows smoke test on Notepad with Ollama `qwen3.5:9b`,
+in both approve and auto mode, against the acceptance criteria in
+`docs/PLAN.md`. Only Notepad may receive input; never interact with any game
+that happens to be running.
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
 
@@ -329,11 +334,9 @@ Ollama and `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
 - an optional directive `reason` field;
-- a cancelled worker can linger on HTTP after a fast disable/re-enable;
-- the planner's `_schedule_planner_cycle_report` and `_PlannerLogHandler` call
-  `root.after` from the scheduler thread, which can block that thread while the
-  Tk thread is busy or closing; the Recording panel (v0.5 task 5) uses a
-  `SimpleQueue` drained by `_poll_preview` instead, and the planner could too.
+- a cancelled worker can linger on HTTP after a fast disable/re-enable.
+(The `root.after` calls from the planner thread were replaced by a queue
+drained in `_poll_preview` in v0.7 task 5.)
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
