@@ -342,6 +342,7 @@ class SaveProfileTests(unittest.TestCase):
             interval_seconds=4.0,
             goal="Type an x when the status bar shows.",
             auto_max_steps=7,
+            llm_notes=True,
         )
         folder = self._save(planner=planner)
 
@@ -349,6 +350,7 @@ class SaveProfileTests(unittest.TestCase):
 
         self.assertEqual(profile.planner.goal, "Type an x when the status bar shows.")
         self.assertEqual(profile.planner.auto_max_steps, 7)
+        self.assertTrue(profile.planner.llm_notes)
         self.assertEqual(profile.planner.interval_seconds, 4.0)
         self.assertEqual(profile.planner.ollama.model, "qwen3.5:9b")
 

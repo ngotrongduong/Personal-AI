@@ -18,15 +18,75 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
+**v0.8.0 "Session memory" (Issue #71) is released.** The integration branch
+`feature/v0.8-session-memory` merged into `main` via PR #73 as a merge
+commit, which closed Issue #71. `main` has `APP_VERSION = "0.8.0"`. Next is
+planning v1.0 in its own issue and milestone branch.
+
+### v0.8 history (for reference)
+
+Built on `feature/v0.8-session-memory`, branched from `main` at the v0.7.0
+release. Task 0 (kickoff) is done:
+- Issue #71;
+- the branch;
+- the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
+- the `AGENTS.md` memory invariant;
+- `memory/` gitignored;
+- the draft release PR feature→`main` (PR #73), kickoff merged via PR #72.
+
+Task 1 (`agent/session_log.py`: strict schema, fail-soft 5 MB-capped writer,
+reader/validator) merged via PR #74. Task 2 (`agent/notes.py`: bounded
+thread-safe `NoteBook`, strict load, atomic save) merged via PR #75. Task 3
+(`remember` directive, Notes section in the prompt, `_CancellableNoteSink`
+in `PlannerController`, import-boundary test) merged via PR #76; `main.py`
+does not pass `notes` / `allow_notes` yet (task 5). Task 4 (profile
+`planner.llm_notes`, `agent/memory_store.py` paths) merged via PR #77.
+Task 5 (the Memory panel: notes list with `[user]`/`[llm]` labels,
+Add / Save Edit / Delete, the "Let the planner write notes" checkbox, the
+session log path; the log opens on planner start and ends on every stop
+path, after input is released on F8; a broken `notes.json` makes the notes
+read-only and is never overwritten) merged via PR #78. Task 6
+(`scripts/memory.py list | show <file> | validate <file>|--all`, read-only,
+exit 1 on a problem) merged via PR #79. Task 7, the live Notepad smoke test
+with Ollama `qwen3.5:9b`, passed all 9 acceptance criteria on 2026-09-25
+(details in `docs/PLAN.md` "Smoke test results"):
+- the log covered approve, reject, expiry, auto and F8;
+- no `remember` while `llm_notes` was off;
+- an LLM note was stored within its caps and reached the next session's
+  prompt;
+- notes survived a restart;
+- "always press f8" / "enable hold_space" notes changed nothing;
+- F8 with an Ollama call in flight ended the log with "emergency stop" and
+  added no note.
+
+Task 7's results landed via PR #80. Task R (release close-out: CHANGELOG,
+README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.8.0"`, the
+`setup.ps1` / `check_system.ps1` banners) followed, then PR #73 closed Issue
+#71.
+
+Local leftover branches are safe for the user to delete (Claude avoids
+`git branch -D`): `claude/v0.8-kickoff`, `claude/v0.8-*` task branches,
+`claude/v0.8-smoke-test`, `claude/v0.8-release`, plus the older ones listed
+below.
+
+Task 5's safety review: no blocker; its
+findings were fixed. A hostile `notes.json` (e.g. `"source": []`, deep
+nesting) never stops start-up or a profile load; a file changed outside the
+app is re-read on the next load and never overwritten; session-log writes
+never raise and happen after the state they record; the planner-notes
+checkbox needs a loaded profile; `tests/conftest.py` always patches the
+memory root.
+
+v0.8 adds a per-planner-session JSONL log and bounded per-profile notes. The
+user edits the notes, and the LLM may add some through a `remember` directive
+when `planner.llm_notes` is on. Memory never widens permissions.
+
+Claude settled the design on 2026-09-25 under the user's standing grant of
+full autonomy (see `docs/PLAN.md` "Design decisions").
+
 **v0.7.0 "Closed-loop planner" (Issue #61) is released.** The integration
 branch `feature/v0.7-closed-loop-planner` merged into `main` via PR #63 as a
 merge commit, which closed Issue #61. `main` has `APP_VERSION = "0.7.0"`.
-
-**Next: v0.8 "Session memory"** (not started): a structured JSONL log of each
-session plus bounded, user-editable notes written by the LLM; memory can never
-widen permissions. It needs a kickoff first: a tracking issue, a
-`feature/v0.8-…` branch from `main`, the `docs/PLAN.md` spec and design
-constraint, and a draft release PR. See "Next task" below.
 
 ### v0.7 history (for reference)
 
@@ -353,17 +413,11 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 kickoff ("Session memory"), following the v0.7 kickoff pattern:
-- open a tracking issue with the goal, safety boundary and checklist;
-- create `feature/v0.8-session-memory` from `main`;
-- replace `docs/PLAN.md` with the v0.8 spec and design constraint (the v0.7
-  plan stays in git history), and update `AGENTS.md` and this file;
-- open a draft release PR feature→`main`.
-
-Settle the design with the user before implementing: the log format and
-where it lives (gitignored, like `recordings/`), how notes are bounded and
-edited, and that memory never widens permissions or enables skills.
-Codex's quota resets 2026-09-25 13:55; pure-logic tasks can go to Codex again.
+v0.8 is released, and no milestone is active. Next: scope v1.0 ("Personal
+Game Agent", see `docs/ROADMAP.md`) in a new issue with its own
+`feature/<milestone>` branch, spec in `docs/PLAN.md`, and draft release PR.
+Codex's quota resets 2026-09-25 13:55, so pure-logic tasks can go to Codex
+again after that.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -394,12 +448,12 @@ Merge gate: green CI on the PR, plus a Windows smoke test when the task
 touches live GUI/capture/input behavior (CI has no real desktop/game window).
 Because the repo is public, never commit recordings, screenshots, templates,
 logs, secrets, or other user data (`.gitignore` covers `recordings/`,
-`snapshots/`, `templates/`, `logs/`, and `profiles/` except
+`snapshots/`, `templates/`, `logs/`, `memory/`, and `profiles/` except
 `profiles/example/`).
 
 ### Open issue
 
-None. Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+No milestone issue is open. Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons

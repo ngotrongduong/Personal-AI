@@ -17,6 +17,8 @@ class PlannerConfig:
     ``goal`` is the free-text objective shown to the planner (v0.7).
     ``auto_max_steps`` is the default step cap offered when the user arms auto
     mode; auto mode itself is never stored.
+    ``llm_notes`` lets the planner add notes for later sessions (v0.8); off
+    by default. Notes are prompt hints only and never widen permissions.
     """
 
     enabled: bool = False
@@ -24,8 +26,11 @@ class PlannerConfig:
     interval_seconds: float = 5.0
     goal: str = ""
     auto_max_steps: int = DEFAULT_AUTO_MAX_STEPS
+    llm_notes: bool = False
 
     def __post_init__(self) -> None:
+        if not isinstance(self.llm_notes, bool):
+            raise ValueError("llm_notes must be a boolean.")
         if not isinstance(self.goal, str):
             raise ValueError("goal must be a string.")
         if len(self.goal) > MAX_GOAL_LENGTH:
@@ -60,6 +65,7 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         "interval_seconds",
         "goal",
         "auto_max_steps",
+        "llm_notes",
     }
     unknown_fields = set(planner) - recognized_fields
     if unknown_fields:
@@ -84,4 +90,5 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         interval_seconds=interval_seconds,
         goal=planner.get("goal", ""),
         auto_max_steps=planner.get("auto_max_steps", DEFAULT_AUTO_MAX_STEPS),
+        llm_notes=planner.get("llm_notes", False),
     )

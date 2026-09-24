@@ -16,6 +16,8 @@ profiles/*
 !profiles/example/
 profiles/example/*
 !profiles/example/profile.json
+# Session memory (v0.8+): notes and session logs are user data
+memory/
 # Datasets exported outside recordings/ (scripts/recordings.py export --out)
 dataset*.jsonl
 *.jsonl.tmp
