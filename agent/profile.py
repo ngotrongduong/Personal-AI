@@ -351,6 +351,27 @@ def _parse_rules(
     return tuple(rules)
 
 
+def read_templates(profile: GameProfile) -> dict[str, np.ndarray]:
+    """Each detector's template image (BGR), keyed by detector name.
+
+    Lets the UI register detectors from arrays and keep those arrays, so the
+    profile can be saved again later.
+    """
+
+    images: dict[str, np.ndarray] = {}
+    for detector in profile.detectors:
+        path = profile.template_path(detector)
+        try:
+            data = np.fromfile(path, dtype=np.uint8)
+        except OSError as error:
+            raise ProfileError(f"Could not read template {path}: {error}") from error
+        image = cv2.imdecode(data, cv2.IMREAD_COLOR) if data.size else None
+        if image is None:
+            raise ProfileError(f"Template {path} is not a readable image.")
+        images[detector.name] = image
+    return images
+
+
 def _register_detectors(profile: GameProfile, registry: DetectorRegistry) -> None:
     registered: list[str] = []
     try:

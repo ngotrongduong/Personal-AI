@@ -32,11 +32,12 @@ Task 0 (kickoff) covered the issue, the branch, `docs/PLAN.md`,
 draft PR feature→`main` (PR #51; the draft release PR is #52). Task 1
 (`agent/skills.py`) merged via PR #53, task 2 (`agent/profile.py` plus
 `profiles/example/profile.json`) via PR #54, task 3 (dispatcher `press`/`hold`,
-foreground check, allowlist re-check, rate limit, cancel) via PR #55. Task 4
-(`agent/skill_executor.py`) is done by Claude on `claude/v0.6-executor` with a
-safety-reviewer pass. Codex was retried on 2026-09-24, but its CLI still
-reported the usage limit (reset 2026-09-25 13:55), so Claude keeps
-implementing. Next is task 5 (UI Profile panel). Task 6 must run skills on the
+foreground check, allowlist re-check, rate limit, cancel) via PR #55, task 4
+(`agent/skill_executor.py`, with a safety-reviewer pass) via PR #56. Task 5
+(UI Profile panel: Load/Save) is done by Claude on `claude/v0.6-profile-ui`.
+Codex was retried on 2026-09-24, but its CLI still reported the usage limit
+(reset 2026-09-25 13:55), so Claude keeps implementing. Next is task 6 (Skills
+panel, rule→skill through the executor, F8 wiring). Task 6 must run skills on the
 executor, never the Tk thread, and the F8 listener must call
 `input.set_enabled(False)` and `executor.cancel()` directly (see PLAN row 3).
 See `docs/PLAN.md` for the design constraint and checklist.
