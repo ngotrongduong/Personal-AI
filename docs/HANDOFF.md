@@ -144,13 +144,16 @@ optional observation-only `on_cycle(PlannerCycleReport)` callback;
 stopped scheduler are dropped via a Tk-thread-only generation counter. Live
 smoke on the real model: 11.0s cold / 2.5s warm `noop` cycles displayed; F8
 reset the label and stopped the planner. Safety-reviewed PASS (3 Minor
-fixed). 146/146 tests.
+fixed). 146/146 tests. PR #38.
 
-All numbered v0.4 tasks (1-10) are now done. Remaining before closing Issue
-#15: merge `main` into `feature/v0.4-llm-planner` (it still has
-`APP_VERSION = "0.2.0"`; `main` has the `0.3.0` fix from PR #28), bump to
-`0.4.0`, update `CHANGELOG.md`/`docs/ROADMAP.md`, then PR the feature branch
-into `main`.
+All numbered v0.4 tasks (1-10) are now done. **Release close-out (2026-09-24):**
+`main` (PR #28) was merged into the v0.4 line on `claude/v0.4-release-prep`,
+resolving the `APP_VERSION` conflict to `"0.4.0"`; `CHANGELOG.md` gained
+v0.3.0 and v0.4.0 entries, `docs/ROADMAP.md` moved v0.4 to Completed (next:
+v0.5 demonstration recording), `docs/ARCHITECTURE.md` documents the planner
+layer, and `README.md` has a v0.4 overview. After that PR lands on
+`feature/v0.4-llm-planner`, the feature branch is PR'd into `main` and Issue
+#15 is closed.
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
@@ -220,10 +223,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Close out v0.4: sync `main` into `feature/v0.4-llm-planner`, bump
-`APP_VERSION` to `0.4.0`, update `CHANGELOG.md`/`docs/ROADMAP.md`, then open the
-feature → `main` PR and close Issue #15. Tasks 1-10 are done; Ollama +
-`qwen3.5:9b` are installed locally.
+Finish the v0.4 release: merge the `feature/v0.4-llm-planner` → `main` PR,
+close Issue #15, and delete the merged feature branch. Then scope v0.5
+(demonstration recording) as a new issue + `docs/PLAN.md`. Ollama +
+`qwen3.5:9b` are installed locally. Open v0.4 follow-ups (not blocking):
+optional directive `reason` field; a cancelled worker can linger on HTTP after
+a fast disable/re-enable.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
