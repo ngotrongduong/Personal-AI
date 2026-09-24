@@ -29,9 +29,13 @@ PR #44 because Codex hit its usage limit (reset 2026-09-25 13:55). Task 4
 Claude and merged via PR #45. Task 5 (the `main.py` "Recording" panel) was done
 by Claude and merged via PR #46. Task 6 (`recording/dataset.py`,
 `recording/review.py`, `scripts/recordings.py`: `list` / `validate` / `export` /
-`review`) was done by Claude on `claude/v0.5-recordings-cli` (safety-reviewed
-PASS WITH NOTES, all fixed); 267 tests pass, 1 skipped (a symlink test that
-needs Windows Developer Mode). See `docs/PLAN.md` for the design
+`review`) was done by Claude and merged via PR #47 (safety-reviewed PASS WITH
+NOTES, all fixed). 267 tests pass, plus 1 skipped symlink test that needs
+Windows Developer Mode. Task 7 was a live Windows smoke test on Notepad at 150%
+scale and passed. Enabling input control stopped recording and F8 stopped it;
+focus lost/gained was logged; 0 frames were dropped at 10 fps; injected input
+was dropped; `validate`/`export`/`review` worked on the real sessions. Details
+are in `docs/PLAN.md` row 7. See `docs/PLAN.md` for the design
 constraint (recording only listens, never sends input, is mutually exclusive
 with autonomous input control, and records input only while the game window is
 foreground).
@@ -251,21 +255,20 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.5 task 7 (Issue #41, `docs/PLAN.md`): the Claude live smoke on Windows.
-Tasks 1-6 are done: the `main.py` "Recording" panel (task 5) drives
-`RecordingController` and writes sessions to `recordings/<stamp>/`, and
-`python scripts/recordings.py list|validate|export|review` (task 6) inspects
-them. Never commit a recording (the repo is public).
+v0.5 task R (Issue #41, `docs/PLAN.md`): release close-out for v0.5.0. That
+means `CHANGELOG.md`, `docs/ROADMAP.md` (move v0.5 to Completed),
+`docs/ARCHITECTURE.md` (the recording layer), `README.md`,
+`APP_VERSION = "0.5.0"` (the window title still says v0.4.0), script banners, and
+then merge PR #43 feature→`main` as a **merge commit**, which closes #41.
+Tasks 0-7 are done. Never commit a recording (the repo is public).
 
-For task 7: record ~1 minute on Notepad or an offline game, then run
-`validate`, `export` and `review` on it. Check DPI scaling (the repo never calls
-`SetProcessDpiAwareness`, so hook coordinates vs `client_region()` may
-disagree at 125-150% scale); injected input (Steam Input, on-screen keyboard,
-remote desktop) is intentionally not recorded; confirm the captured hwnd is the
-top-level window (foreground is compared with `==`, so a child hwnd would record
-no input). After task 6: 7 (Claude live smoke,
-which also exercises the Recording panel on a real game window), R (release). Ollama and
-`qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
+Open v0.5 follow-ups (not blocking):
+- per-monitor DPI awareness is set implicitly by importing `dxcam`, and a
+  deliberate `SetProcessDpiAwareness(2)` at startup would make this robust;
+- injected input (Steam Input, on-screen keyboard, remote desktop, automation
+  tools) is intentionally not recorded, and the README should say so.
+
+Ollama and `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
 - an optional directive `reason` field;
