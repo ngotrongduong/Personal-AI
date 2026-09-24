@@ -56,12 +56,32 @@
   frame ↔ state ↔ action `dataset.jsonl`) / `review` (overlay viewer).
 - Live-smoke-tested on Windows at 150% scaling with 0 dropped frames at 10 fps.
 
-## Next — to be decided
+### Stage 6 — Game Profiles + Skills (v0.6, Issue #50)
+- Per-game profiles loaded at runtime: `profiles/<name>/profile.json` plus
+  templates. Save them from the UI, then edit the JSON. Loading is strictly
+  validated and refused while input control is on.
+- Named skills (`click` / `press` / `hold`), disabled by default.
+- Per-profile permissions:
+  - a key allowlist, checked by the loader and again by the dispatcher;
+  - `f8`, the Windows keys and key combos are always forbidden;
+  - a hold cap of at most 5 s;
+  - a rate limit.
+- Rules fire skills. The Skills panel runs them by hand. Skills run one at a
+  time on a worker thread, still through `ActionDispatcher`.
+- Key skills run only while the game window is in the foreground. F8 releases
+  held keys, then cancels the running skill.
+- Live-smoke-tested on Windows with Notepad, including F8 during a hold.
 
-- Imitation-learning experiments on recorded datasets (offline training only).
-  Any replay of recorded or learned actions into a game must go through the
-  gated `ActionDispatcher`.
-- Or move toward v1.0 (below).
+## Next (toward v1.0)
+
+- v0.7 — closed-loop planner. The LLM picks a skill *name* from the profile,
+  never coordinates or keys. Approve-each-step by default; explicit opt-in auto
+  mode with a rate limit and an action budget. The outcome is observed after
+  each action.
+- v0.8 — session memory: a structured JSONL log plus bounded, user-editable
+  notes written by the LLM. Memory can never widen permissions.
+- Imitation-learning experiments on recorded datasets remain a possible side
+  track (offline training only; any replay goes through `ActionDispatcher`).
 
 ## Later
 

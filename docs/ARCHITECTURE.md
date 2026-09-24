@@ -1,6 +1,6 @@
 # Architecture
 
-## Fast runtime loop (v0.3, unchanged in v0.4/v0.5)
+## Fast runtime loop (v0.3; v0.6 adds skills between rules and the dispatcher)
 
 ```text
 DXcam frame
@@ -70,10 +70,14 @@ State and decisions:
 Before sending input it checks:
 
 1. input control is explicitly enabled,
-2. the requested action is supported,
+2. the requested action is supported (`click`, and since v0.6 `press` /
+   `hold`),
 3. the intent is still fresh,
-4. a target bbox exists,
-5. the captured target window is still resolvable.
+4. the target is valid:
+   - click: a bbox exists and the captured window is still resolvable;
+   - key: the loaded profile allows the key and the hold time, and the
+     captured window is in the foreground;
+5. no key action is running, and the profile's rate limit is not exceeded.
 
 The live loop passes the hwnd from the active capture session rather than the
 window-picker combobox, because the combobox can change while capture continues
@@ -172,6 +176,41 @@ control are mutually exclusive, so a dataset holds only human input:
 
 F8 and window close release input first, then stop the planner, then stop
 recording.
+
+## v0.6 game profiles and skills
+
+```text
+profiles/<name>/profile.json + templates/*.png
+   ↓  load_profile (strict validation; only while input control is off)
+DetectorRegistry · RuleEngine (skill rules) · SkillBook · SkillPermissions
+   ↓
+rule fires / Skills panel Run → SkillBook.build_intent → ActionIntent(skill, key, hold)
+   ↓
+SkillExecutor (one worker thread, one skill at a time)
+   ↓
+ActionDispatcher (allowlist re-check, foreground check, rate limit) → InputController
+```
+
+- `agent/skills.py` defines `ClickSkill` / `PressSkill` / `HoldSkill`,
+  `SkillPermissions` and `SkillBook`. `FORBIDDEN_KEYS` (`f8`, the Windows keys,
+  `apps`) and `HARD_MAX_HOLD_SECONDS = 5.0` hold for every profile. A click
+  skill needs a visible, fresh, confident detector. Skills start disabled.
+- `agent/profile.py` has `load_profile`, `save_profile`, `list_profiles` and
+  `profile_slug`.
+  - Loading rejects unknown fields, duplicates, broken references and template
+    paths outside the profile folder.
+  - Saving never deletes files and asks before writing into an existing folder.
+- `agent/skill_executor.py` (`SkillExecutor`):
+  - refuses a new skill while one is running;
+  - `cancel()` ends a hold early;
+  - results go through a queue that the Tk thread drains in `_poll_preview`.
+- `ActionDispatcher` stays the only path to input. It re-checks the key
+  against the loaded profile's permissions, so with no profile loaded no key
+  can be sent.
+
+F8 order: turn input control off (which releases held keys), cancel the
+executor, stop the planner, then stop recording. The F8 listener does the first
+two directly on the hotkey thread, so a hold ends even while Tk is busy.
 
 ## Why the LLM is not in the fast loop
 

@@ -21,6 +21,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 - `vision/`: visual detectors.
 - `agent/`: game state and decision/rule logic.
 - `configs/`: per-game configuration.
+- `profiles/`: runtime game profiles (v0.6+; gitignored except `profiles/example/`).
 - `tests/`: deterministic tests.
 - `docs/`: architecture, roadmap, and operating notes.
 
@@ -49,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- There is no active integration branch right now. v0.5.0 has been released to `main`. The next milestone gets its own `feature/<milestone>` branch from `main` once the user chooses it.
+- No integration branch is active: v0.6.0 (`feature/v0.6-profiles-skills`, Issue #50) is released into `main`. The next milestone (v0.7) starts its own `feature/*` branch from `main`.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -93,8 +94,21 @@ feature/<milestone>
 
 ## Current priority
 
-v0.5.0 (Issue #41, demonstration recording) is released. The next milestone is
-not decided yet (`docs/ROADMAP.md`), so ask the user before starting one.
+v0.6 "Game Profiles + Skills" (Issue #50) on `feature/v0.6-profiles-skills`.
+It is the first step toward v1.0: v0.6 profiles + skills, then v0.7 a planner
+that picks skills, then v0.8 memory, then v1.0. Read `docs/PLAN.md`'s design
+constraint section before implementing anything here.
+
+Skill invariant (permanent, from v0.6):
+- `ActionDispatcher` is the only path from a skill to `InputController`.
+- A key must be in the profile's allowlist, and it is checked by the loader
+  and again by the dispatcher.
+- F8, Win and Apps keys and key combos are forbidden in code.
+- A hold is capped at 5.0 s.
+- Key skills run only while the captured window is foreground.
+- A skill is disabled by default.
+- From v0.7 an LLM may only choose a skill *name* from the profile; it never
+  supplies coordinates, keys or durations.
 
 Recording invariant (permanent): recording only listens — it must never send input, never run while
 autonomous input control is enabled, and never record input while the game

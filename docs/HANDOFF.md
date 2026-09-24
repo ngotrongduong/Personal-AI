@@ -18,13 +18,43 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-24)
 
-**v0.5.0 ("Demonstration recording", Issue #41) is released.** The release
-close-out (task R) bumped `APP_VERSION` and the script banners to 0.5.0 and
-updated `CHANGELOG.md`, `README.md`, `docs/ROADMAP.md` and
-`docs/ARCHITECTURE.md`. `feature/v0.5-demo-recording` was then merged into
-`main` via PR #43 as a merge commit, which closes Issue #41. **No milestone
-after v0.5 has been chosen yet**; see `docs/ROADMAP.md` ("Next — to be
-decided"). Ask the user before starting one.
+**v0.6.0 "Game Profiles + Skills" (Issue #50) is released.** The
+integration branch `feature/v0.6-profiles-skills` merged into `main` via PR #52
+as a merge commit. Next is v0.7, the closed-loop planner, which needs its own
+kickoff (issue, `feature/*` branch, `docs/PLAN.md`).
+The user chose to move toward v1.0 in steps:
+- v0.6 profiles + skills, no LLM;
+- v0.7 a closed-loop planner that picks skill *names* only, approve-each-step
+  by default, with an explicit opt-in auto mode;
+- v0.8 session memory;
+- v1.0 integration.
+
+Task 0 (kickoff) covered the issue, the branch, `docs/PLAN.md`,
+`AGENTS.md`, this file, `docs/ROADMAP.md`, `profiles/*` gitignored, and the
+draft PR feature→`main` (PR #51; the draft release PR is #52). Task 1
+(`agent/skills.py`) merged via PR #53, task 2 (`agent/profile.py` plus
+`profiles/example/profile.json`) via PR #54, task 3 (dispatcher `press`/`hold`,
+foreground check, allowlist re-check, rate limit, cancel) via PR #55, task 4
+(`agent/skill_executor.py`, with a safety-reviewer pass) via PR #56, task 5
+(UI Profile panel: Load/Save) via PR #57, task 6 (Skills panel, rule→skill
+through the executor, F8 wiring, with a safety-reviewer pass) via PR #58.
+Task 7, the live Notepad smoke test, passed on 2026-09-24, including F8 inside
+the real pynput hook releasing a held key at once, a click skill rule, and a
+key skill rule BLOCKED while Notepad was not foreground (details in PLAN row 7).
+Codex was retried on 2026-09-24, but its CLI still reported the usage limit
+(reset 2026-09-25 13:55), so Claude keeps implementing. Task R (release
+close-out: CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION =
+"0.6.0"`) followed, then PR #52 closed Issue #50.
+
+Local leftover branches could not be deleted by Claude (a `git branch -D` was
+denied) and are safe for the user to delete: `codex/v0.6-profile`,
+`codex/v0.6-dispatcher`, `claude/v0.6-skills`, `claude/v0.6-executor`,
+`claude/v0.6-profile-ui`, `claude/v0.6-skills-ui`, `claude/v0.6-smoke`,
+`claude/v0.6-release`.
+See `docs/PLAN.md` for the design constraint and checklist.
+
+**v0.5.0 ("Demonstration recording", Issue #41) is released**, merged into
+`main` via PR #43 as a merge commit (`2f1e408`).
 
 ### v0.5 history (for reference)
 
@@ -264,10 +294,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-None is scheduled. v0.5.0 is released, and the next milestone is still to be
-decided with the user. The candidates are offline imitation-learning
-experiments on recorded datasets, or the v1.0 agent loop (`docs/ROADMAP.md`).
-Never commit a recording (the repo is public).
+v0.7 kickoff: the closed-loop planner, where the LLM picks a skill *name* from
+the loaded profile, each step is approved by default, and an explicit opt-in
+auto mode exists. See `docs/ROADMAP.md`. Never commit a recording, a profile template PNG or any
+other user data, because the repo is public.
 
 Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set
 implicitly by importing `dxcam`. Calling `SetProcessDpiAwareness(2)` explicitly
@@ -297,12 +327,13 @@ Merge gate: green CI on the PR, plus a Windows smoke test when the task
 touches live GUI/capture/input behavior (CI has no real desktop/game window).
 Because the repo is public, never commit recordings, screenshots, templates,
 logs, secrets, or other user data (`.gitignore` covers `recordings/`,
-`snapshots/`, `templates/`, `logs/`).
+`snapshots/`, `templates/`, `logs/`, and `profiles/` except
+`profiles/example/`).
 
 ### Open issue
 
-None. Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3) and Issue #4 are all
-completed and closed.
+None. Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3)
+and Issue #4 are all completed and closed.
 
 ## Lessons
 
