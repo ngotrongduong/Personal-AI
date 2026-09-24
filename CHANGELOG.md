@@ -2,6 +2,41 @@
 
 All notable project changes are tracked here.
 
+## v0.5.0 — Demonstration recording
+
+- Added a "Recording" panel (default off, explicit Record button, always-visible
+  "● REC" status). It records your own demonstrations of the captured game window
+  into `recordings/<YYYYmmdd_HHMMSS>/`:
+  - `frames/000001.jpg` frames, 1-30 fps (default 10);
+  - `events.jsonl` (frames, `GameState` snapshots, keys, mouse buttons,
+    throttled mouse moves, scroll, focus changes, start/stop markers), all on
+    one monotonic clock;
+  - `session.json` with counts and the stop reason.
+- Input is recorded only while the captured window is in the foreground. Mouse
+  coordinates are client-relative, and mouse events outside the client area are
+  dropped. F8 and software-injected input (SendInput, on-screen keyboard, remote
+  desktop, automation tools) are never recorded.
+- The `recording/` package only listens: it never sends input and never imports
+  the input path. Recording and autonomous input control are mutually exclusive:
+  Record is refused while input control is on, and enabling input control
+  stops recording.
+- F8 and window close stop recording after releasing input and stopping the
+  planner. Sessions also stop at 30 minutes, when free disk drops below 1 GB,
+  or when the window closes. Frames are encoded on a background thread, and
+  frames are dropped and counted when the writer falls behind; events are never
+  dropped.
+- Added `python scripts/recordings.py`:
+  - `list` shows sessions;
+  - `validate` checks timing, counts and frame files;
+  - `export` writes an aligned `dataset.jsonl`: one row per frame with its
+    state and the actions until the next frame;
+  - `review` is an OpenCV viewer with click/key/mouse overlays.
+  It never deletes data and refuses to overwrite unless `--overwrite` is given.
+- `recordings/` and exported datasets are gitignored.
+- Live-smoke-tested on Windows at 150% display scaling: 0 dropped frames at
+  10 fps. Stopping on input-control enable and on F8, focus lost/gained events,
+  and filtering of injected input were all verified.
+
 ## v0.4.0 — Local AI Planner
 
 - Added an optional local LLM planner backed by Ollama (default model

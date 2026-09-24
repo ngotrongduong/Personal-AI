@@ -1,6 +1,6 @@
 # Architecture
 
-## Fast runtime loop (v0.3, unchanged in v0.4)
+## Fast runtime loop (v0.3, unchanged in v0.4/v0.5)
 
 ```text
 DXcam frame
@@ -130,6 +130,48 @@ RuleEngine.enable_rule / disable_rule   (never ActionIntent, never input)
 while the fast loop evaluates them. F8 and window close release input *before*
 stopping the planner. The planner has no path to `ActionIntent`,
 `ActionDispatcher`, or `InputController`; the dispatcher's gates are unchanged.
+
+## v0.5 demonstration recording (optional, default off)
+
+```text
+WindowCapture.latest_frame() + GameState.snapshot()   (sampler thread, 1-30 fps)
+pynput keyboard/mouse listeners → InputRecorder       (listen only)
+   ↓  one monotonic clock
+SessionWriter  (bounded queue, JPG encode on a background thread)
+   ↓
+recordings/<stamp>/  frames/*.jpg · events.jsonl · session.json
+   ↓  offline
+scripts/recordings.py  list / validate / export (dataset.jsonl) / review
+```
+
+- `recording/schema.py` defines the event and session records and validates
+  them strictly: unknown event types are rejected.
+- `recording/session_writer.py` (`SessionWriter`): when the queue is full,
+  frames are dropped and counted, but events are never dropped. `close()`
+  flushes and writes `session.json`.
+- `recording/input_recorder.py` (`InputRecorder`):
+  - records only while the captured hwnd is in the foreground;
+  - converts mouse coordinates to client-relative and drops mouse events
+    outside the client area;
+  - skips F8 and injected input (`LLKHF_INJECTED` / `LLMHF_INJECTED`);
+  - throttles mouse moves and emits `focus` gained/lost.
+- `recording/recorder_controller.py` (`RecordingController`) owns the sampler
+  thread, the listeners and the writer.
+  - `stop()` never blocks the Tk thread.
+  - It enforces the 30-minute cap and the 1 GB free-disk floor, and it stops
+    when the window closes.
+- `recording/dataset.py` handles reading, validation, the aligned export
+  (frame ↔ state ↔ actions until the next frame) and the review viewer. It
+  never deletes data.
+
+Boundary: `recording/` never imports `InputController`, `ActionDispatcher`,
+`ActionIntent` or `pydirectinput`, and it never sends input. Recording and input
+control are mutually exclusive, so a dataset holds only human input:
+- `main.py` refuses Record while input control is on;
+- enabling input control stops recording.
+
+F8 and window close release input first, then stop the planner, then stop
+recording.
 
 ## Why the LLM is not in the fast loop
 
