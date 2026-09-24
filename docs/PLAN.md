@@ -58,8 +58,11 @@ Recording observes; it never acts. Concretely:
 `recordings/<YYYYmmdd_HHMMSS>/`:
 
 - `session.json` — `format_version`, `app_version`, window title, client size,
-  `record_fps`, `started_at` (wall clock) + monotonic `t0`, `ended_at`,
-  frame/dropped/event counts, stop reason.
+  `record_fps`, `started_at` / `ended_at` (wall clock, ISO-8601),
+  frame/dropped/event counts, stop reason. Written at open (with
+  `ended_at: null`) and rewritten atomically at close, so a crashed session is
+  still recognisable. The monotonic `t0` itself is not stored: it is only
+  meaningful within one boot, and every `t` is already relative to it.
 - `frames/000001.jpg` — BGR frame encoded with `cv2.imencode` (quality 85).
 - `events.jsonl` — one JSON object per line, `t` = seconds since `t0`
   (monotonic), plus `type`:
@@ -77,12 +80,12 @@ Recording observes; it never acts. Concretely:
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
 | 0 | Kickoff | Done | Claude | Issue #41, `feature/v0.5-demo-recording` from `main`, this file, `AGENTS.md`/`docs/HANDOFF.md` updated, `recordings/` gitignored, draft PR feature→`main`. |
-| 1 | `recording/schema.py` | Not started | Codex | Dataclasses for each event type + session metadata; strict to/from JSON (unknown `type`/extra fields rejected); `Observation` serialization. Pure-logic tests. |
-| 2 | `recording/session_writer.py` | Not started | Codex | `SessionWriter(root_dir, clock)`: creates the session folder; background writer thread + bounded queue; JPEG encode off-thread; full queue drops frames only and counts `dropped`; `close()` flushes and writes `session.json`. Tests with a temp dir. |
-| 3 | `recording/input_recorder.py` | Not started | Codex | Wraps pynput keyboard + mouse listeners with injectable `is_target_foreground()`, `client_region()`, `clock`. Foreground, client-area, F8 and injected-event filters; client-relative coordinates; mouse-move throttle; `focus` gained/lost events. Tests drive the callbacks directly with fakes. |
+| 1 | `recording/schema.py` | Done (PR pending) | Claude (Codex out of quota) | `FORMAT_VERSION = 1`; frozen slotted dataclasses per event type + `ObservationRecord` + `SessionInfo`; constructors validate too (`t` ≥ 0 and finite, enums, bool ≠ int); strict `event_from_dict`/`session_from_dict` raise `SchemaError` on unknown type, missing/extra fields, wrong types. `observation_to_record(obs, t0)` stores `observed_t` relative to `t0`; non-finite values become `null`. 16 tests. |
+| 2 | `recording/session_writer.py` | Done (PR pending) | Claude (Codex out of quota) | `SessionWriter(root_dir, *, …, clock, max_queue_frames=64, jpeg_quality=85, encoder)`: unique session folder (`name`, `name_2`, …), daemon writer thread; `write_frame` drops + counts when pending frames hit the cap; frame indices are assigned on successful write, so files stay contiguous even after encode errors; `write_event` never drops; `close(reason, join_timeout=0.0)` never blocks, thread drains then rewrites `session.json` atomically; `stats()`. 9 tests. |
+| 3 | `recording/input_recorder.py` | Done (PR pending) | Claude (Codex out of quota) | pynput keyboard + mouse listeners via injectable `listener_factory`; `win32_event_filter` hides `LLKHF_INJECTED`/`LLMHF_INJECTED` events from the handlers (never suppresses them for the system); foreground, client-area (half-open) and F8 filters; client-relative coordinates; ~30 Hz move throttle; `focus` gained/lost via `poll_focus()` or on input. One lock serialises both listener threads so the sink sees events in `t` order; sink/foreground errors are logged, never raised into pynput. 13 tests + an AST test that `recording/` never imports input senders or any `Controller`. |
 | 4 | `recording/recorder_controller.py` | Not started | Codex | `RecordingController.start(hwnd, capture, game_state, root_dir, fps)` / non-blocking `stop(reason)`: sampler thread (default 10 fps, 1–30) pairs `capture.latest_frame()` with `game_state.snapshot()` on one timestamp; wires `InputRecorder` + `SessionWriter`; duration/disk limits; observation-only `on_status` (frames, dropped, events, elapsed). Tests with fake capture/listener. |
 | 5 | `main.py` "Recording" panel | Not started | Codex (Claude review) | Record/Stop button, fps spinbox, status "● REC 00:42 · 420 frames · 0 dropped · 1.2k events". Enabled only while capturing and input control is off. F8/close/enabling input stop recording (after input release). Status marshaled via `root.after(0)` + generation counter like the planner panel. Tk tests like `tests/test_main_planner_visibility.py`. |
-| 6 | Review + export: `recording/dataset.py` + `scripts/recordings.py` | Not started | Codex | CLI `list` (sessions + summary), `validate` (referenced frames exist, `t` non-decreasing, counts match `session.json`), `export` (one `dataset.jsonl` row per frame: frame file, state at that time, actions in `[t, next_frame_t)`), `review` (cv2 window, overlay clicks/keys, ←/→ to step). Never deletes data. |
+| 6 | Review + export: `recording/dataset.py` + `scripts/recordings.py` | Not started | Codex | CLI `list` (sessions + summary), `validate` (referenced frames exist, `t` non-decreasing per source — frame/state vs input may interleave by a few ms since they are enqueued from different threads — counts match `session.json`), `export` (one `dataset.jsonl` row per frame: frame file, state at that time, actions in `[t, next_frame_t)`), `review` (cv2 window, overlay clicks/keys, ←/→ to step). Never deletes data. |
 | 7 | Live Windows smoke test | Not started | Claude | ~1 min on Notepad or an offline game: typing in another app not recorded; alt-tab emits `focus lost`; input control on blocks/stops Record; F8 stops immediately and the session closes cleanly; dropped ≈ 0 at 10 fps; `validate`/`export`/`review` work. `safety-reviewer` pass for tasks 3/4/5. |
 | R | Release close-out (v0.5.0) | Not started | Claude | `CHANGELOG.md`, `docs/ROADMAP.md`, `docs/ARCHITECTURE.md` (recording layer), `README.md`, `APP_VERSION = "0.5.0"`, script banners; feature→`main` as a **merge commit**; close Issue #41. |
 
