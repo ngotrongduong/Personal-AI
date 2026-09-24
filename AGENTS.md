@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- No integration branch is active: v0.7.0 (`feature/v0.7-closed-loop-planner`, Issue #61) is released into `main`. The next milestone (v0.8) starts its own `feature/*` branch from `main`; its sub-task PRs target that branch, and it merges into `main` as a merge commit at release.
+- Active integration branch: `feature/v0.8-session-memory` (v0.8, Issue #71). Its sub-task PRs target that branch, and it merges into `main` as a merge commit at release.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,12 +94,30 @@ feature/<milestone>
 
 ## Current priority
 
-v0.8 "Session memory" is next (not started; it needs its own tracking issue,
-integration branch and `docs/PLAN.md`). It is the third step toward v1.0:
-v0.6 profiles + skills and v0.7 a planner that picks skills (both released),
-then v0.8 a structured session log plus bounded, user-editable notes written by
-the LLM, then v1.0. Memory can never widen permissions. Write the v0.8 design
-constraint section in `docs/PLAN.md` before implementing anything here.
+v0.8 "Session memory" (Issue #71, `feature/v0.8-session-memory`) is in
+progress. It is the third step toward v1.0:
+- v0.6 profiles + skills (released);
+- v0.7 a planner that picks skills (released);
+- v0.8 a structured session log plus bounded, user-editable notes that the
+  LLM may add;
+- then v1.0.
+
+Read the design constraint section in `docs/PLAN.md` before implementing
+anything here.
+
+Memory invariant (permanent, from v0.8):
+- Memory never widens permissions. Notes and session logs are read only by
+  the Memory panel, the planner prompt and `scripts/memory.py`. They are never
+  read by the profile loader, skills, permissions, rules, autopilot, executor
+  or dispatcher.
+- The memory modules never import the input path.
+- The LLM's `remember` directive is text only (1–200 chars), it is off unless
+  the profile sets `planner.llm_notes`, and it never edits or deletes a note.
+- Notes are bounded:
+  - at most 20 notes, of which at most 10 come from the LLM;
+  - at most one LLM note per 30 s.
+- Memory data lives under the gitignored `memory/` folder. It is never
+  committed and never deleted by the app.
 
 Planner invariant (permanent, from v0.7):
 - The LLM directive `run_skill` carries only a skill *name* and a display-only

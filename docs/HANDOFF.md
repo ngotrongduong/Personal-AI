@@ -18,15 +18,26 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
+**v0.8 "Session memory" (Issue #71) is in progress** on
+`feature/v0.8-session-memory`, branched from `main` at the v0.7.0 release.
+Task 0 (kickoff) is done:
+- Issue #71;
+- the branch;
+- the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
+- the `AGENTS.md` memory invariant;
+- `memory/` gitignored;
+- the draft release PR feature→`main`.
+
+v0.8 adds a per-planner-session JSONL log and bounded per-profile notes. The
+user edits the notes, and the LLM may add some through a `remember` directive
+when `planner.llm_notes` is on. Memory never widens permissions.
+
+Claude settled the design on 2026-09-25 under the user's standing grant of
+full autonomy (see `docs/PLAN.md` "Design decisions").
+
 **v0.7.0 "Closed-loop planner" (Issue #61) is released.** The integration
 branch `feature/v0.7-closed-loop-planner` merged into `main` via PR #63 as a
 merge commit, which closed Issue #61. `main` has `APP_VERSION = "0.7.0"`.
-
-**Next: v0.8 "Session memory"** (not started): a structured JSONL log of each
-session plus bounded, user-editable notes written by the LLM; memory can never
-widen permissions. It needs a kickoff first: a tracking issue, a
-`feature/v0.8-…` branch from `main`, the `docs/PLAN.md` spec and design
-constraint, and a draft release PR. See "Next task" below.
 
 ### v0.7 history (for reference)
 
@@ -353,17 +364,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 kickoff ("Session memory"), following the v0.7 kickoff pattern:
-- open a tracking issue with the goal, safety boundary and checklist;
-- create `feature/v0.8-session-memory` from `main`;
-- replace `docs/PLAN.md` with the v0.8 spec and design constraint (the v0.7
-  plan stays in git history), and update `AGENTS.md` and this file;
-- open a draft release PR feature→`main`.
-
-Settle the design with the user before implementing: the log format and
-where it lives (gitignored, like `recordings/`), how notes are bounded and
-edited, and that memory never widens permissions or enables skills.
-Codex's quota resets 2026-09-25 13:55; pure-logic tasks can go to Codex again.
+v0.8 task 1, `agent/session_log.py`, then tasks 2–6 in the order given in
+`docs/PLAN.md`. Each task lands through a `claude/…` or `codex/…` PR into
+`feature/v0.8-session-memory`. Codex's quota resets 2026-09-25 13:55, so
+pure-logic tasks can go to Codex again after that.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -394,12 +398,13 @@ Merge gate: green CI on the PR, plus a Windows smoke test when the task
 touches live GUI/capture/input behavior (CI has no real desktop/game window).
 Because the repo is public, never commit recordings, screenshots, templates,
 logs, secrets, or other user data (`.gitignore` covers `recordings/`,
-`snapshots/`, `templates/`, `logs/`, and `profiles/` except
+`snapshots/`, `templates/`, `logs/`, `memory/`, and `profiles/` except
 `profiles/example/`).
 
 ### Open issue
 
-None. Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+Issue #71 (v0.8 Session memory) is open and tracks the current milestone.
+Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons

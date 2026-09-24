@@ -1,8 +1,8 @@
-# v0.7 detailed plan — Closed-loop planner
+# v0.8 detailed plan — Session memory
 
-Granular checklist for the current milestone (GitHub Issue #61), with status
+Granular checklist for the current milestone (GitHub Issue #71), with status
 and owner, so progress can be checked without opening GitHub. This is the same
-checklist as Issue #61. **Keep them in sync:** when you tick something here,
+checklist as Issue #71. **Keep them in sync:** when you tick something here,
 tick or comment it there too, in the same commit or timeframe as the work.
 
 For the current PR and branch situation, see `docs/HANDOFF.md` instead. That
@@ -11,293 +11,260 @@ file changes faster than this one should.
 Earlier versions of this file are preserved in git history on `main`:
 - v0.4 Local AI Planner;
 - v0.5 Demonstration recording;
-- v0.6 Game Profiles + Skills.
+- v0.6 Game Profiles + Skills;
+- v0.7 Closed-loop planner.
 
 `docs/ROADMAP.md`'s Completed section summarizes them.
 
 ## Goal
 
-This is the second step toward v1.0 (vision → state → plan → action →
+This is the third step toward v1.0 (vision → state → plan → action →
 observation). The road to v1.0 has one spec and one release per step:
 
 - v0.6 Profiles + Skills (released, Issue #50);
-- **v0.7 closed-loop planner that picks skills (this milestone)**;
-- v0.8 session memory: a structured JSONL log plus bounded, user-editable
-  notes written by the LLM;
+- v0.7 closed-loop planner that picks skills (released, Issue #61);
+- **v0.8 session memory (this milestone)**;
 - v1.0 integration, a permissions panel, and a long smoke test.
 
-v0.7 delivers:
-- The Ollama planner can propose running one skill from the loaded profile, by
-  **name only**.
-- **Approve-each-step** is the default mode. Each proposal is shown in the
-  Planner panel with Approve / Reject buttons.
-- **Auto mode** is an explicit opt-in. Proposals then run without a click,
-  inside a step budget and automatic stop conditions.
-- **Closed loop:** each prompt carries the goal, the current observations, the
-  enabled skills, the rules and the outcomes of the last steps.
-- A **Goal** field in the Planner panel is saved in the profile.
+v0.8 delivers:
+- A **session log**: every planner session writes a structured, append-only
+  JSONL file. It holds cycles, proposals, steps with their decisions and
+  outcomes, auto on/off, and note changes. It is an audit trail for the user
+  and data for later offline analysis. The planner does not read it back.
+- **Notes**: a small, bounded set of notes per profile, kept across sessions
+  and shown to the planner in its prompt.
+  - The user adds, edits and deletes notes in a new **Memory** panel.
+  - The LLM may add short notes with a new `remember` directive, but only when
+    the profile allows it (`planner.llm_notes`, default **off**).
 
-User decisions (2026-09-24):
-- The LLM only picks a **skill name** defined by the profile. Coordinates, keys
-  and durations always come from the profile, and all input goes through
-  `ActionDispatcher`.
-- The goal comes from a UI field and is stored as `planner.goal` in the
-  profile. Load fills the field, and Save writes it.
-- The v0.4 `enable_rule` / `disable_rule` directives are kept and still apply
-  directly, because they send no input. Only `run_skill` needs approval.
-- Auto mode has a step cap. It also turns itself off on events and after
-  repeated failures.
+Design decisions (made by Claude on 2026-09-25 under the user's standing grant
+of full autonomy):
+- A session starts when the planner starts and ends when the planner stops:
+  planner off, F8, profile load, Clear Rules or window close. Turning input
+  off or auto off does not end it, because the planner keeps running. There is
+  one file per session.
+- Data lives under a gitignored `memory/` folder, per profile slug, and never
+  inside `profiles/`, because `profiles/example/` is tracked.
+- Notes are plain hints for the prompt. Nothing but the prompt reads them.
+- An edited LLM note becomes a user note, so the LLM can no longer replace it.
 
 ## Design constraint (read before implementing anything)
 
-1. **The LLM chooses a name, nothing else.** `run_skill` has exactly the
-   fields `type`, `skill` and `reason`. There is no field for a key,
-   coordinate, duration or detector. The skill must exist in the loaded
-   profile **and be enabled** when the directive is parsed. It is checked
-   again when it runs. `reason` is display and prompt text only; it is never
-   parsed for commands.
-2. **Only the Tk thread submits skills.**
-   - The planner thread puts a validated `SkillProposal` into a thread-safe
-     single-slot `ProposalMailbox`. The Tk loop (`_poll_preview`) takes it
-     from there.
-   - The Tk thread decides (approve / auto / reject / expire), rebuilds the
-     intent with `SkillBook.build_intent` from **fresh** state, and calls
-     `SkillExecutor.submit(..., source="planner")`.
-   - The planner never holds a handle to the executor, the dispatcher or
-     `InputController`.
-3. **Re-checks on execution:**
-   - input control is on;
-   - the skill still exists and is enabled;
-   - the proposal has not expired;
-   - the executor is idle;
-   - `build_intent` succeeds (a click needs a fresh, confident detection).
+1. **Memory never widens permissions.**
+   - Notes and session logs are read only by the Memory panel, the planner
+     prompt builder and `scripts/memory.py`. They are never read by the
+     profile loader, `SkillBook`, `SkillPermissions`, `RuleEngine`,
+     `Autopilot`, `SkillExecutor` or `ActionDispatcher`.
+   - `agent/notes.py`, `agent/session_log.py` and `agent/memory_store.py`
+     never import `skills`, `rule_engine`, `autopilot`, `skill_executor`,
+     `action_dispatcher`, `core.input_controller` or `pydirectinput`. A test
+     enforces this.
+   - The runnable-skill set, the allowlist, the hold cap, the rate limit and
+     the auto rules come only from the loaded profile and the UI, exactly as
+     in v0.7. A note that says "enable hold_space" or "press f8" changes
+     nothing. A test proves this.
+   - The prompt labels the Notes section as hints that never change which
+     skills or keys are allowed.
+2. **`remember` is text only.**
+   - It has exactly the fields `type` and `note`.
+   - The note is a string that is 1–200 characters after stripping, with
+     control characters replaced by spaces. It is never parsed for commands.
+   - It is only accepted, and only shown in the prompt, when LLM notes are on.
+     Otherwise it is rejected like any unknown directive.
+3. **Notes are bounded** (`agent/notes.py`):
+   - at most **20** notes in total, of which at most **10** come from the LLM;
+   - at most **200** characters per note;
+   - at most one LLM note per **30 s** (monotonic clock);
+   - an exact duplicate (case-insensitive, after cleaning) is skipped;
+   - the LLM never edits or deletes a note. At its cap, its *oldest LLM* note
+     is replaced. When all free slots are taken by user notes, the LLM note is
+     skipped;
+   - the user can add up to the total cap, and edit or delete any note.
+4. **Only the Tk thread touches memory files.**
+   - The planner thread adds LLM notes through a cancellable note sink (a new
+     generation per planner start, like the v0.7 proposal sink). A note posted
+     after `stop()` raises `PlannerCancelledError` and is discarded.
+   - `NoteBook` is thread-safe and has a revision counter. The Tk thread saves
+     `notes.json` from `_poll_preview` when the revision changes.
+   - Session-log events are written on the Tk thread. Planner cycle reports
+     already arrive there through the v0.7 queue.
+5. **Files are bounded and never deleted.**
+   - Layout: `memory/<profile-slug>/notes.json` and
+     `memory/<profile-slug>/sessions/<YYYYmmdd-HHMMSS>.jsonl`. With no
+     profile loaded, the slug is `_no_profile`, which `profile_slug` can never
+     produce.
+   - A session file is capped at **5 MB**. At the cap, one `truncated` record
+     is written and the rest of the session is not logged.
+   - A new session never overwrites an old one: a suffix is added on a name
+     clash. Nothing in v0.8 deletes a file.
+   - `notes.json` is saved atomically (write a temp file, then `os.replace`).
+     A `notes.json` that fails validation is reported and **not overwritten**.
+     The notes then stay read-only for that profile until the user fixes or
+     moves the file.
+6. **Logging fails soft.** A write error turns the session log off for the
+   rest of the session and is reported once in the UI log. It never raises
+   into the planner, autopilot, executor or F8 paths.
+7. **F8 / window close:** input off → `executor.cancel()` → stop the planner
+   (which drops the proposal, turns auto off and cancels the note sink) →
+   end the session log → stop recording. The v0.7 ordering is unchanged, and
+   logging comes after everything that stops input.
+8. The v0.4–v0.7 invariants still hold: the planner invariant, the skill
+   invariant, and "recording only listens". Skills are disabled by default. A
+   profile loads only while input control is off. `profiles/*` and `memory/`
+   are gitignored (except `profiles/example/profile.json`).
 
-   Every dispatcher gate stays unchanged: allowlist, foreground for keys, hold
-   cap, rate limit, busy. A proposal that fails a re-check is recorded as
-   `refused` and does not run.
-4. **One step at a time.**
-   - The mailbox holds at most one proposal. It stays occupied from the moment
-     a proposal is posted until the Tk thread resolves it: rejected, expired,
-     refused, or the skill's result drained.
-   - The scheduler skips its LLM call (no Ollama request) while the mailbox is
-     occupied or the executor is busy.
-   - In approve mode, a proposal expires after **10 s**.
-5. **Auto mode is opt-in and bounded.**
-   - The mode is **never persisted**. Every app start, profile load and F8
-     returns to approve mode.
-   - Turning auto on requires input control to be on and a confirmation
-     dialog.
-   - Auto turns itself off:
-     - after `planner.auto_max_steps` executed steps (default 20, hard cap
-       **100**);
-     - after **3** consecutive refused, BLOCKED or failed steps;
-     - on F8;
-     - when input control is turned off;
-     - on profile load;
-     - on Clear Rules;
-     - when the planner is disabled.
-6. **F8 / window close:** `input.set_enabled(False)` (releases held keys) →
-   `executor.cancel()` → stop the planner, drop any pending proposal and turn
-   auto off → stop recording. The ordering is unchanged from v0.6.
-7. **Stale work is discarded.**
-   - Each planner start gets a new generation.
-   - A proposal posted after `stop()` raises `PlannerCancelledError`, the same
-     pattern as the v0.4 `_CancellableRuleControl`.
-   - The Tk thread drops any proposal from an older generation.
-8. The v0.4, v0.5 and v0.6 invariants still hold. `recording/` only listens.
-   Recording and input control stay mutually exclusive. Skills are disabled by
-   default. A profile loads only while input control is off. `profiles/*` is
-   gitignored except `profiles/example/profile.json`.
+## Session log (`agent/session_log.py`)
 
-## Directive schema (`agent/llm_planner_schema.py`)
+One JSON object per line. Every record has:
+- `v`: 1;
+- `type`: one of the types below;
+- `t`: seconds since the session started (monotonic, 3 decimals);
+- `wall`: local time, ISO 8601 with seconds.
+
+| `type` | Extra fields |
+|--------|--------------|
+| `session_start` | `app_version`, `profile` (name or null), `model`, `goal`, `auto_max_steps`, `llm_notes` |
+| `cycle` | `status`, `message`, `latency_s` (number or null) |
+| `step` | `skill`, `reason`, `decision` (approved / auto / rejected / expired / refused), `outcome`, `ok` (bool or null) |
+| `auto` | `on` (bool), `reason`, `max_steps` (int or null) |
+| `note` | `action` (add / edit / delete / skip), `source` (user / llm), `text` |
+| `truncated` | `limit_bytes` |
+| `session_end` | `reason` |
+
+- Text fields are cleaned (printable characters only) and cut to 500
+  characters.
+- `SessionLogWriter(path, clock=time.monotonic, wall=datetime.now)`:
+  `write(type, **fields)` validates the record against the schema, and an
+  invalid record is a programming error (`ValueError`). I/O errors turn the
+  writer off (`failed` is set, `error` is kept) and never raise. `close(reason)`
+  writes `session_end` once.
+- `read_session(path)` / `validate_session(path)` read strictly. They reject
+  unknown types and fields, and require `session_start` first and at most one
+  `session_end`, at the end. They return the records or a list of problems.
+
+## Notes (`agent/notes.py`)
 
 ```json
-{"type": "run_skill", "skill": "<an enabled skill name>", "reason": "<1-200 chars>"}
-{"type": "enable_rule", "rule_name": "<rule name>"}
-{"type": "disable_rule", "rule_name": "<rule name>"}
-{"type": "noop"}
+{"format_version": 1,
+ "notes": [{"text": "The status bar shows after typing.", "source": "user",
+            "updated": "2026-09-25T10:00:00"}]}
 ```
 
-`parse_directive(raw, known_rule_names, runnable_skill_names=())` accepts
-`run_skill` under these conditions:
-- the fields are exactly `type`, `skill` and `reason`;
-- `skill` is a non-empty string in `runnable_skill_names`;
-- `reason` is a string that is 1–200 characters after stripping;
-- control characters are replaced with spaces.
+- `Note(text, source, updated)`. `source` is `user` or `llm`.
+- `NoteBook(clock=time.monotonic, wall=datetime.now)`:
+  - user edits: `add_user(text)`, `edit(index, text)` (the note becomes a user
+    note), `delete(index)`;
+  - LLM: `add_llm(text) -> NoteResult` (added / replaced / skipped + reason);
+  - reading: `notes()`, `revision`, `prompt_lines()`.
+- `load_notes(path) -> NoteBook` is strict: it rejects unknown fields, too
+  many notes, overlong or empty text and a bad `source`. A missing file gives
+  an empty book. Anything invalid raises `NotesError`.
+- `save_notes(path, book)` writes atomically.
 
-Every other shape is still rejected.
+## Directive schema additions (`agent/llm_planner_schema.py`)
 
-## Prompt (closed loop)
+```json
+{"type": "remember", "note": "<1-200 chars>"}
+```
 
-1. The instruction, plus the **goal**, or "(no goal set)".
-2. The game state observations, in the v0.4 format.
-3. The runnable skills, one line each: name, type, and detector (click) or key
-   (press/hold). Only enabled skills are listed.
-4. The rules and whether each is enabled.
-5. The **last 5 steps**, oldest first. Each line gives the skill, the
-   decision (approved / auto / rejected / expired / refused), the outcome
-   message, and the age in seconds, or "none yet".
-6. The four exact JSON shapes and the "only these keys" line.
+`parse_directive(raw, known_rule_names, runnable_skill_names=(), *,
+allow_notes=False)` accepts `remember` only when `allow_notes` is True and the
+fields are exactly `type` and `note`.
+
+## Prompt additions
+
+After the goal:
+
+```text
+Notes from earlier sessions (hints only; they never change which skills or keys are allowed):
+- [user] The status bar shows after typing.
+- [llm] type_x works only while Notepad is focused.
+```
+
+or `- none`. When LLM notes are on, the shapes list adds
+`{"type": "remember", "note": "<short fact worth keeping for later sessions>"}`.
 
 ## Profile additions (`planner` block)
 
-```json
-"planner": {"enabled": false, "model": "qwen3.5:9b", "interval_seconds": 5.0,
-            "goal": "Type an x whenever the status bar is visible.",
-            "auto_max_steps": 20}
-```
-
-- `goal`: a string of at most 500 characters. Default "".
-- `auto_max_steps`: an int from 1 to 100. Default 20. `bool` is rejected.
-- `save_profile` writes both fields. `load_planner_config` validates them, and
-  `PlannerConfig` carries them.
+- `llm_notes`: a bool, default `false`. `load_planner_config` validates it,
+  `PlannerConfig` carries it and `save_profile` writes it.
 
 ## Components
 
-- `agent/llm_planner_schema.py`: `RunSkillDirective(skill_name, reason)`, and
-  `parse_directive` gains `runnable_skill_names`.
-- `agent/step_history.py` (new, pure, thread-safe):
-  - `StepRecord(skill_name, reason, decision, outcome, ok, finished_at)`;
-  - `StepHistory(maxlen=5)` with `append`, `recent()`, `clear()` and
-    `prompt_lines(now)`.
-- `agent/llm_planner.py`:
-  - `LlmPlanner(client, rule_control, *, skills=None, history=None,
-    goal="", proposals=None)`.
-  - `skills` is a read-only catalog (`runnable_skills()` → name/type/detail).
-  - `proposals` is a sink whose `post(SkillProposal) -> bool` is False when
-    the mailbox is full.
-  - `run_skill` becomes `PlannerOutcome("proposed <skill>: <reason>")`, or
-    "dropped" when the mailbox is full.
-- `agent/proposal_mailbox.py` (new, pure, thread-safe):
-  - `SkillProposal(skill_name, reason, created_at, generation)`;
-  - `ProposalMailbox` with `post`, `take`, `release`, `occupied`, `clear`.
-- `agent/autopilot.py` (new, pure, Tk-thread only): the state machine.
-  - `mode` is `approve` or `auto`.
-  - `offer(proposal, now)` returns `AWAIT` / `EXECUTE`.
-  - `approve(now)`, `reject()` and `expire(now)` resolve a pending proposal.
-  - `record_result(ok)` returns an auto-off reason when 3 failures come in a
-    row.
-  - Also `arm_auto(max_steps)`, `disarm(reason)`, `steps_taken`.
-- `agent/planner_scheduler.py`: an optional `should_plan: Callable[[], bool]`
-  gate. When it returns False, the cycle is skipped without calling the
-  planner and nothing is reported.
-- `agent/planner_controller.py`: `start(..., skills=, history=, goal=,
-  mailbox=, should_plan=)` wires a cancellable proposal sink (a new
-  generation per start). `stop()` cancels it.
-- `agent/planner_config.py` / `agent/profile.py`: `goal`, `auto_max_steps`.
-- `main.py`, Planner panel:
-  - a Goal entry;
-  - a mode radio (Approve each step / Auto), plus an auto step counter;
-  - a proposal line with Approve / Reject buttons;
-  - planner cycle reports and log lines now go through a `SimpleQueue`
-    drained in `_poll_preview` instead of `root.after` from the scheduler
-    thread (closes a v0.4 follow-up).
+- `agent/session_log.py` (new, pure): schema, writer, reader/validator.
+- `agent/notes.py` (new, pure, thread-safe): `Note`, `NoteBook`,
+  `load_notes`, `save_notes`, `NotesError`.
+- `agent/memory_store.py` (new, pure): `memory_dir(root, profile_name)`,
+  `notes_path(...)`, `new_session_path(...)` (unique, never overwrites),
+  `list_sessions(...)`.
+- `agent/llm_planner_schema.py`: `RememberDirective(note)`.
+- `agent/llm_planner.py`: `LlmPlanner(..., notes=None, note_sink=None)`.
+  `notes` is a read-only view for the prompt. `note_sink.remember(text) ->
+  str` returns the outcome message. `remember` becomes
+  `PlannerOutcome("noted: …")` or `"note skipped: …"`.
+- `agent/planner_controller.py`: `start(..., notes=, allow_notes=)` wires a
+  cancellable note sink per generation, and `stop()` cancels it.
+- `agent/planner_config.py` / `agent/profile.py`: `llm_notes`.
+- `main.py`:
+  - a **Memory** panel with a notes list, an entry, Add / Edit / Delete, a
+    "Let the planner write notes" checkbox (mirrors `planner.llm_notes`) and
+    the current session log path;
+  - the session log is opened on planner start and closed on every planner
+    stop path;
+  - cycle reports, proposals, step results, auto on/off and note changes are
+    logged from the Tk thread.
+- `scripts/memory.py`: `list` (profiles, note counts, sessions), `show <file>`
+  (a readable summary), `validate [<file>|--all]`.
 
 ## Checklist
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | Done | Claude | Issue #61, `feature/v0.7-closed-loop-planner` from `main`, this file, `AGENTS.md` / `docs/HANDOFF.md`, draft PR feature→`main`. |
-| 1 | `run_skill` directive + closed-loop prompt + `agent/step_history.py` + `agent/proposal_mailbox.py` | Done | Claude (Codex out of quota until 2026-09-25 13:55) | Pure tests: schema accept/reject (extra fields, disabled/unknown skill, reason length/type, control chars), prompt contents (goal, only enabled skills, history lines), mailbox single-slot/thread safety, history ring buffer. Fails closed on every error path. |
-| 2 | `agent/autopilot.py` | Done | Claude | Pure tests: approve/reject/expire, auto execute and step cap, 3 consecutive failures, disarm reasons, a second offer while pending is dropped. |
-| 3 | Scheduler gate + controller wiring | Done | Claude, safety-reviewer | `should_plan` skip (no planner call), cancellable proposal sink (post after stop raises `PlannerCancelledError`), generation per start. |
-| 4 | Profile `planner.goal` / `planner.auto_max_steps` | Done | Claude | Loader validation, save round-trip, `PlannerConfig` fields. |
-| 5 | UI Planner panel + executor + F8 wiring | Done | Claude, safety-reviewer | Tk tests like `tests/test_main_skills_panel.py`: approve runs through the executor, reject/expire release the mailbox, auto needs input on and a confirmation, the auto-off triggers, F8 order, stale generation dropped, planner reports via queue. safety-reviewer PASS WITH NOTES; fixed: auto re-checked after its confirmation (F8 meanwhile wins), auto pinned to the confirmed window, auto click skills need the foreground, proposals older than the TTL dropped, the generation re-checked per step. |
-| 6 | Live Windows smoke test | Done | Claude | Passed 2026-09-25 on Notepad with Ollama `qwen3.5:9b`, all 9 criteria; results below. No app bug found. |
-| R | Release close-out (v0.7.0) | Done (2026-09-25) | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit** (PR #63), which closes Issue #61. |
+| 0 | Kickoff | Done | Claude | Issue #71, `feature/v0.8-session-memory` from `main`, this file, `AGENTS.md` / `docs/HANDOFF.md` / `.gitignore`, draft PR feature→`main`. |
+| 1 | `agent/session_log.py` | Todo | Claude (Codex out of quota until 2026-09-25 13:55) | Pure tests: every record type, unknown type/field rejected, text cleaned and cut, 5 MB cap writes one `truncated`, I/O error turns the writer off without raising, `close` writes one `session_end`, reader rejects bad order/fields. |
+| 2 | `agent/notes.py` | Todo | Claude | Pure tests: user add/edit/delete, the caps (20 / 10 / 200 chars), LLM interval, duplicates, oldest-LLM replacement, all-user-slots skip, edit turns a note into a user note, strict load, atomic save, thread safety. |
+| 3 | `remember` directive + Notes in the prompt + cancellable note sink | Todo | Claude, safety-reviewer | Schema accept/reject (off by default, exact fields, length, control chars), prompt contents, a note never changes the runnable set, sink cancelled after stop, import-boundary test. |
+| 4 | Profile `planner.llm_notes` + `agent/memory_store.py` | Todo | Claude | Loader validation, save round-trip, paths per slug, `_no_profile`, unique session names, nothing deleted. |
+| 5 | UI Memory panel + session log wiring | Todo | Claude, safety-reviewer | Tk tests: the panel edits and saves notes, a broken `notes.json` is not overwritten, the log opens on planner start and closes on every stop path (F8 after input off and executor cancel), events are logged, a write failure is reported once. |
+| 6 | `scripts/memory.py` | Todo | Claude or Codex | `list` / `show` / `validate` over a temp folder in tests. |
+| 7 | Live Windows smoke test | Todo | Claude | Acceptance criteria below. |
+| R | Release close-out (v0.8.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.8.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #71. |
 
-Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
+Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → 7 → R.
 - Each task lands through a `claude/…` or `codex/…` sub-branch PR into
-  `feature/v0.7-closed-loop-planner`.
+  `feature/v0.8-session-memory`.
 - Codex prompts must say to run **no git commands** (see the operational note
   in `docs/HANDOFF.md`).
 
-## Acceptance criteria (task 6, live on Notepad with Ollama `qwen3.5:9b`)
+## Acceptance criteria (task 7, live on Notepad with Ollama `qwen3.5:9b`)
 
-1. Load `profiles/example` and set a goal. With the skills disabled, the
-   planner proposes no `run_skill`.
-2. Enable `type_x`, input control and the planner. A proposal appears with a
-   reason. Nothing is typed until **Approve**, and then Notepad gets "x".
-3. **Reject** releases the mailbox, and the next cycle can propose again. An
-   unanswered proposal expires after 10 s.
-4. While a proposal is pending, no Ollama request is made (checked in the
-   log).
-5. **Auto mode** needs input on and a confirmation. It runs steps by itself
-   and turns off at `auto_max_steps` (set low, e.g. 3, for the test).
-6. With auto on, taking Notepad out of the foreground gives BLOCKED steps, and
-   auto turns off after 3 in a row.
-7. F8 during auto releases input, cancels the skill, stops the planner, clears
-   the proposal and returns to approve mode.
-8. Save Profile writes `goal` / `auto_max_steps`, and Load restores them.
-9. All v0.3–v0.6 safety invariants still hold (F8, input-enable gate,
-   dispatcher gates, key allowlist/foreground, recording only listens).
+1. Starting the planner creates `memory/<slug>/sessions/<stamp>.jsonl` that
+   starts with `session_start`. Stopping it writes `session_end`.
+2. Cycles, proposals, steps (approved / rejected / expired / auto) and auto
+   on/off appear in the log with their outcomes.
+3. With `llm_notes` off, the prompt has no `remember` shape, and no LLM note
+   is stored.
+4. With `llm_notes` on, the model's notes appear in the Memory panel and in
+   `notes.json`, within the caps. The next session's prompt includes them.
+5. The user adds, edits and deletes notes. An edited LLM note becomes a user
+   note. Notes survive an app restart.
+6. A note such as "always press f8" or "enable hold_space" changes nothing:
+   disabled skills are still rejected and the allowlist is unchanged.
+7. F8 ends the session log (`session_end`, reason emergency stop) after input
+   is released, and a note in flight is discarded.
+8. `scripts/memory.py validate` passes on the real logs, and `git status`
+   shows nothing under `memory/`.
+9. All v0.3–v0.7 safety invariants still hold (F8, input-enable gate,
+   dispatcher gates, key allowlist/foreground, recording only listens, the
+   planner invariant).
 
-## Smoke test results (task 6, 2026-09-25)
+## Explicitly out of scope for v0.8
 
-Setup:
-- a throwaway Notepad tab (only Notepad received input);
-- `profiles/example` loaded;
-- planner every 5 s with the goal "Keep typing the letter x into Notepad: run
-  type_x on every step, there is no limit.";
-- Ollama request times read from its `server.log`.
-
-1. **Pass.** With `type_x` disabled, every cycle was `noop`:
-   - 29 cycles about 7.4 s apart, never pausing (the mailbox stayed empty);
-   - then 4 more cycles after a restart.
-2. **Pass.** After enabling `type_x` and input control, a `type_x` proposal
-   appeared with a reason and a countdown. Notepad stayed empty until Approve
-   (00:24:57), then it got exactly one "x".
-3. **Pass.**
-   - Reject: logged "rejected", and the next cycle proposed again.
-   - Unanswered proposals: expired at exactly 10 s (for example 00:25:00 →
-     00:25:10).
-4. **Pass.** No Ollama request completed while a proposal was pending.
-   - Cycle spacing: 13 s while proposals expired (10 s pending + ~3 s call),
-     against 3–7 s after an Approve or Reject.
-   - Example: requests at 00:25:00 / 13 / 26 / 39 / 52, 00:26:05 / 18 / 32.
-5. **Pass.**
-   - The confirmation dialog stated the cap (3).
-   - Auto ran 3 steps by itself; Notepad got "xxx".
-   - "Auto mode OFF: reached the 3-step limit." (00:27:48).
-   - The next proposal waited for approval again.
-6. **Pass.** Auto was on (cap 10) with the app, not Notepad, in the
-   foreground. Every step was "BLOCKED: Target window is not the foreground
-   window; key blocked", and no "x" was typed. Logged: "Auto mode OFF: 3 failed
-   steps in a row." (00:28:38).
-7. **Pass.** F8 during auto (after one auto "x") at 00:29:28:
-   - auto off and planner stopped ("disabled by emergency stop"), with input
-     control unticked and the proposal cleared;
-   - mode back to approve;
-   - the last Ollama request was at 00:29:27, none after.
-8. **Pass.**
-   - Save Profile as `smoke_v07` (gitignored) wrote the goal and
-     `auto_max_steps: 10`.
-   - Loading `example` cleared the goal and set the cap to 20; loading
-     `smoke_v07` again restored both.
-9. **Pass.**
-   - Input stayed off until ticked, and F8 unticked it.
-   - Profile loads ran with input off and loaded every skill disabled.
-   - Record was disabled while input control was on.
-   - Key skills were BLOCKED outside the foreground (criterion 6).
-   - The model once returned a rule toggle naming the skill `type_x`. It was
-     rejected ("references unknown rule"), and nothing changed.
-   - The full test suite passes: 500 passed, 1 skipped.
-
-Observations (no action needed):
-- The closed loop visibly works. After expirations the model's reasons said
-  "previous attempts expired". After the BLOCKED steps it wrote "previous
-  blocks due to window focus are transient".
-- Approve focuses the game window, as designed. Keystrokes typed afterwards
-  go to the game, not to the app.
-
-## Explicitly out of scope for v0.7
-
-- Multi-skill sequences or plans in one proposal.
-- Persistent logs and memory (v0.8).
-- The LLM enabling or disabling skills, or editing the profile.
-- Auto-focusing the game window for planner steps: a key step is simply
-  BLOCKED if the game is not foreground. Only the user's own clicks focus the
-  game, like Run: Approve, and confirming auto mode (once).
+- Feeding old session logs back into the prompt, summarizing sessions, or
+  any retrieval or embedding search.
+- The LLM editing or deleting notes.
+- Notes shared between profiles.
+- Memory that changes skills, keys, rules, permissions or auto mode.
 - Anti-cheat bypassing, protected-process evasion, memory injection, packet
   manipulation, credential theft, or stealth/persistence behavior. This is a
   standing invariant from `AGENTS.md`.
