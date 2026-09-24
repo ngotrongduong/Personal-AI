@@ -17,11 +17,16 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-24)
 
-v0.3 ("Game State + Rules", Issue #1) is **done and merged into `main`**
-(PR #2, merge commit `ef3ad40`). Issue #1 is closed. 64/64 tests pass, ruff
-clean, on `main`.
+**v0.4.0 ("Local AI Planner", Issue #15) is released: merged into `main`**
+via PR #16 (merge commit `5b24233`). Issue #15 is closed, and
+`feature/v0.4-llm-planner` plus its sub-branches were deleted. `main` has
+`APP_VERSION = "0.4.0"`; 146/146 tests pass, ruff clean. No milestone is in
+progress yet; see "Next task" below.
 
-**v0.4 ("Local AI Planner", Issue #15) is now scoped and in progress** on
+v0.3 ("Game State + Rules", Issue #1) was merged into `main` earlier (PR #2,
+merge commit `ef3ad40`). Issue #1 is closed.
+
+The v0.4 history below is kept for reference. **v0.4 was built** on
 `feature/v0.4-llm-planner`. Backend decision: **Ollama** (user confirmed,
 2026-09-23) — headless REST API, no GUI dependency, fits local scripted
 verification. See `docs/PLAN.md` for the full checklist/design constraint
@@ -151,9 +156,12 @@ All numbered v0.4 tasks (1-10) are now done. **Release close-out (2026-09-24):**
 resolving the `APP_VERSION` conflict to `"0.4.0"`; `CHANGELOG.md` gained
 v0.3.0 and v0.4.0 entries, `docs/ROADMAP.md` moved v0.4 to Completed (next:
 v0.5 demonstration recording), `docs/ARCHITECTURE.md` documents the planner
-layer, and `README.md` has a v0.4 overview. After that PR lands on
-`feature/v0.4-llm-planner`, the feature branch is PR'd into `main` and Issue
-#15 is closed.
+layer, and `README.md` has a v0.4 overview (PR #39, a merge commit so `main`
+stays an ancestor). The same pass fixed flaky test isolation: Tk objects from
+`test_main_planner_visibility.py` could be garbage-collected on a later
+test's background thread, where tkinter stalls about 1s. `tearDown` now runs
+`gc.collect()` on the main thread. The feature branch was then merged into
+`main` (PR #16, which closed Issue #15).
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
@@ -223,12 +231,15 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Finish the v0.4 release: merge the `feature/v0.4-llm-planner` → `main` PR,
-close Issue #15, and delete the merged feature branch. Then scope v0.5
-(demonstration recording) as a new issue + `docs/PLAN.md`. Ollama +
-`qwen3.5:9b` are installed locally. Open v0.4 follow-ups (not blocking):
-optional directive `reason` field; a cancelled worker can linger on HTTP after
-a fast disable/re-enable.
+Scope v0.5 (demonstration recording: record screen state plus the user's
+actions to build datasets, per `docs/ROADMAP.md`). Create a new issue, a
+`feature/v0.5-...` integration branch with a draft PR into `main`, and a fresh
+`docs/PLAN.md`. The v0.4 checklist stays in git history. Ollama and
+`qwen3.5:9b` are installed locally.
+
+Open v0.4 follow-ups (not blocking; could become small issues):
+- an optional directive `reason` field;
+- a cancelled worker can linger on HTTP after a fast disable/re-enable.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
@@ -247,16 +258,16 @@ Record that local verification explicitly in each PR.
 
 ### Open issue
 
-- **#15** — v0.4 Local AI Planner. `docs/PLAN.md` mirrors its checklist with
-  status/owner columns.
-
-Issue #1 (v0.3) and Issue #4 are both completed/closed.
+None. Issue #15 (v0.4), Issue #1 (v0.3) and Issue #4 are all completed/closed.
 
 ## Lessons
 
 - Before merging an already-reviewed PR, verify its current HEAD again. A later
   push can otherwise be left behind by a fast merge.
 - Put handoff/plan updates in the same push as the meaningful work they describe.
+- A PR that merges `main` into an integration branch must land as a merge
+  commit, not a squash. Otherwise `main` is not an ancestor, and the release PR
+  hits the same conflicts again.
 
 ## Longer-term plan
 
