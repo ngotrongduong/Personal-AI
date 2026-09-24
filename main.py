@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import logging
 import math
 import queue
@@ -18,11 +18,22 @@ from pynput import keyboard
 import win32gui
 
 from agent.action_dispatcher import ActionDispatcher
+from agent.autopilot import (
+    DEFAULT_AUTO_MAX_STEPS,
+    DEFAULT_TTL_SECONDS,
+    HARD_MAX_AUTO_STEPS,
+    MAX_CONSECUTIVE_FAILURES,
+    Autopilot,
+    OfferResult,
+    validate_auto_max_steps,
+)
 from agent.game_state import GameState
+from agent.llm_planner import MAX_GOAL_LENGTH, SkillBookCatalog
 from agent.ollama_client import OllamaClientConfig
 from agent.planner_config import PlannerConfig
 from agent.planner_controller import PlannerController
 from agent.planner_scheduler import PlannerCycleReport
+from agent.proposal_mailbox import ProposalMailbox, SkillProposal
 from agent.profile import (
     DetectorDefinition,
     GameProfile,
@@ -37,10 +48,11 @@ from agent.profile import (
 from agent.rule_engine import SKILL_RULE_ACTION, ActionIntent, RuleEngine, VisibilityRule
 from agent.skill_executor import SkillExecutor
 from agent.skills import ClickSkill, HoldSkill, PressSkill, Skill, SkillBook, SkillPermissions
+from agent.step_history import Decision, StepHistory, StepRecord
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
-from core.window_utils import list_visible_windows, client_region, focus_window
+from core.window_utils import list_visible_windows, client_region, focus_window, is_foreground
 from recording.recorder_controller import (
     DEFAULT_FPS as RECORDING_DEFAULT_FPS,
     MAX_FPS as RECORDING_MAX_FPS,
@@ -55,10 +67,14 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "0.6.0"
+APP_VERSION = "0.7.0"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
 PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
 PLANNER_MESSAGE_MAX_CHARS = 100
+PLANNER_NO_PROPOSAL_TEXT = "Proposal: none."
+PLANNER_APPROVE_MODE_TEXT = "Mode: approve each step."
+# Executor source of planner steps; their results feed the autopilot and history.
+PLANNER_SOURCE = "planner"
 
 RECORDING_IDLE_TEXT = "Recording: off."
 RECORDING_STOP_F8 = "f8"
@@ -224,7 +240,7 @@ def format_recording_status(status: RecordingStatus) -> str:
 
 
 class _PlannerLogHandler(logging.Handler):
-    """Forward scheduler-thread planner logs onto Tk's event loop."""
+    """Queue scheduler-thread planner logs for the Tk loop (never calls into Tk)."""
 
     def __init__(self, app: PersonalGameAIApp) -> None:
         super().__init__(level=logging.INFO)
@@ -237,16 +253,8 @@ class _PlannerLogHandler(logging.Handler):
             self.handleError(record)
             return
 
-        if self._app._closing:
-            return
-        try:
-            self._app.root.after(0, self._log_if_open, message)
-        except (tk.TclError, RuntimeError):
-            pass
-
-    def _log_if_open(self, message: str) -> None:
         if not self._app._closing:
-            self._app.log(f"Planner: {message}")
+            self._app._planner_queue.put(("log", 0, message))
 
 
 class PersonalGameAIApp:
@@ -352,6 +360,29 @@ class PersonalGameAIApp:
         # Bumped on every planner start/stop (Tk thread only) so cycle reports
         # from a stopped or replaced scheduler are never displayed.
         self._planner_generation = 0
+        # Cycle reports and log lines from the scheduler thread, drained by
+        # _poll_preview: ("cycle", generation, report) or ("log", 0, message).
+        self._planner_queue: queue.SimpleQueue[tuple[str, int, object]] = queue.SimpleQueue()
+        # v0.7 closed loop. The planner thread only posts proposals to the
+        # mailbox; the Tk thread decides (Autopilot) and submits the skill.
+        self.proposals = ProposalMailbox()
+        self.step_history = StepHistory()
+        self.autopilot = Autopilot()
+        # How the running planner step was decided ("approved" or "auto").
+        self._planner_decision: Decision | None = None
+        # The intent submitted for that step; its drained run completes it.
+        self._planner_intent: ActionIntent | None = None
+        # The window auto mode was confirmed for; auto steps run nowhere else.
+        self._auto_hwnd: int | None = None
+        self.planner_goal_var = tk.StringVar(value="")
+        # Plain-str copy of the Goal field for the planner thread, which must
+        # never read a Tk variable. Updated on the Tk thread by a trace.
+        self._planner_goal = ""
+        self.planner_goal_var.trace_add("write", self._sync_planner_goal)
+        self.planner_mode_var = tk.StringVar(value="approve")
+        self.planner_auto_steps_var = tk.StringVar(value=str(DEFAULT_AUTO_MAX_STEPS))
+        self.planner_mode_status_var = tk.StringVar(value=PLANNER_APPROVE_MODE_TEXT)
+        self.planner_proposal_var = tk.StringVar(value=PLANNER_NO_PROPOSAL_TEXT)
 
         self.record_fps_var = tk.StringVar(value=f"{RECORDING_DEFAULT_FPS:g}")
         self.recording_status_var = tk.StringVar(value=RECORDING_IDLE_TEXT)
@@ -576,6 +607,58 @@ class PersonalGameAIApp:
             textvariable=self.planner_interval_var,
             width=7,
         ).pack(side="left")
+
+        goal_row = ttk.Frame(planner_box)
+        goal_row.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Label(goal_row, text="Goal:").pack(side="left")
+        ttk.Entry(
+            goal_row, textvariable=self.planner_goal_var, width=90
+        ).pack(side="left", padx=(4, 0), fill="x", expand=True)
+
+        mode_row = ttk.Frame(planner_box)
+        mode_row.pack(fill="x", padx=8, pady=(0, 4))
+        ttk.Radiobutton(
+            mode_row,
+            text="Approve each step",
+            value="approve",
+            variable=self.planner_mode_var,
+            command=self._set_planner_mode,
+        ).pack(side="left")
+        ttk.Radiobutton(
+            mode_row,
+            text="Auto",
+            value="auto",
+            variable=self.planner_mode_var,
+            command=self._set_planner_mode,
+        ).pack(side="left", padx=(10, 0))
+        ttk.Label(mode_row, text="Auto max steps:").pack(side="left", padx=(15, 4))
+        ttk.Spinbox(
+            mode_row,
+            from_=1,
+            to=HARD_MAX_AUTO_STEPS,
+            increment=1,
+            textvariable=self.planner_auto_steps_var,
+            width=5,
+        ).pack(side="left")
+        ttk.Label(
+            mode_row, textvariable=self.planner_mode_status_var
+        ).pack(side="left", padx=(15, 0))
+
+        proposal_row = ttk.Frame(planner_box)
+        proposal_row.pack(fill="x", padx=8, pady=(0, 4))
+        self.planner_approve_button = ttk.Button(
+            proposal_row, text="Approve", command=self.approve_planner_proposal
+        )
+        self.planner_approve_button.pack(side="left")
+        self.planner_reject_button = ttk.Button(
+            proposal_row, text="Reject", command=self.reject_planner_proposal
+        )
+        self.planner_reject_button.pack(side="left", padx=(4, 10))
+        ttk.Label(
+            proposal_row, textvariable=self.planner_proposal_var
+        ).pack(side="left")
+        self._refresh_planner_panel()
+
         ttk.Label(
             planner_box, textvariable=self.planner_status_var
         ).pack(anchor="w", padx=8, pady=(0, 2))
@@ -751,6 +834,7 @@ class PersonalGameAIApp:
         if not self.control_var.get():
             # Input is already off, so a held key is released; end the skill too.
             self.executor.cancel()
+            self._disarm_auto("input control was disabled")
         if self.control_var.get():
             self.status_var.set("INPUT ENABLED")
             self.log("Keyboard/mouse control ENABLED.")
@@ -809,7 +893,10 @@ class PersonalGameAIApp:
         self.control_var.set(False)
         self.status_var.set("EMERGENCY STOP (F8)")
         planner_was_running = self.planner.is_running
+        # Stopping the planner clears its mailbox; the pending proposal is
+        # dropped and auto mode turns off.
         self.planner.stop()
+        self._reset_planner_steps("of the emergency stop")
         self._reset_planner_last_cycle()
         self.planner_enabled_var.set(False)
         self.planner_status_var.set("Planner: disabled by emergency stop.")
@@ -1062,6 +1149,7 @@ class PersonalGameAIApp:
     def _stop_planner_for(self, why: str):
         planner_was_running = self.planner.is_running
         self.planner.stop()
+        self._reset_planner_steps(why)
         self._reset_planner_last_cycle()
         self.planner_enabled_var.set(False)
         self.planner_status_var.set(f"Planner: disabled because {why}.")
@@ -1131,6 +1219,10 @@ class PersonalGameAIApp:
         self.skill_book = skill_book
         self.profile = profile
         self._rebuild_skills_panel()
+        # Planner steps of another profile's skills mean nothing here.
+        self.step_history.clear()
+        self.planner_goal_var.set(profile.planner.goal)
+        self.planner_auto_steps_var.set(str(profile.planner.auto_max_steps))
 
         if profile.detectors:
             self.detectors_var.set(
@@ -1176,6 +1268,12 @@ class PersonalGameAIApp:
             messagebox.showerror("Save Profile", str(exc))
             return
 
+        try:
+            planner = self._planner_config_to_save()
+        except ValueError as exc:
+            messagebox.showerror("Save Profile", str(exc))
+            return
+
         overwrite = False
         if (self.profiles_dir / slug).exists():
             if not messagebox.askyesno(
@@ -1194,7 +1292,7 @@ class PersonalGameAIApp:
                 skills=contents.skills,
                 rules=contents.rules,
                 permissions=self.profile.permissions if self.profile is not None else None,
-                planner=self.profile.planner if self.profile is not None else None,
+                planner=planner,
                 overwrite=overwrite,
             )
         except (ProfileError, ValueError) as exc:
@@ -1352,10 +1450,18 @@ class PersonalGameAIApp:
             finished = datetime.fromtimestamp(run.finished_at).strftime("%H:%M:%S")
             self._set_skill_result(name, f"{finished} {outcome}: {run.result.reason}")
             self.log(f"Skill '{name}' ({run.source}) -> {outcome}: {run.result.reason}")
+            # Identity, not source: a run from before a planner reset must
+            # never be credited to a newer step.
+            if intent is not None and intent is self._planner_intent:
+                self._planner_intent = None
+                self._planner_step_finished(
+                    run.result.dispatched, f"{outcome}: {run.result.reason}"
+                )
 
     def _toggle_planner(self):
         if not self.planner_enabled_var.get():
             self.planner.stop()
+            self._reset_planner_steps("the planner was disabled")
             self._reset_planner_last_cycle()
             self.planner_status_var.set("Planner: disabled.")
             self.log("LLM planner DISABLED.")
@@ -1370,12 +1476,20 @@ class PersonalGameAIApp:
                 ollama=OllamaClientConfig(model=self.planner_model_var.get().strip()),
                 interval_seconds=interval_seconds,
             )
+            self._reset_planner_steps("the planner was restarted")
             self._reset_planner_last_cycle()
             generation = self._planner_generation
+            book = self.skill_book
             self.planner.start(
                 self.rule_engine,
                 config,
-                on_cycle=lambda report: self._schedule_planner_cycle_report(generation, report),
+                on_cycle=lambda report: self._queue_planner_cycle_report(generation, report),
+                # Only enabled skills are offered, re-read on every cycle.
+                skills=SkillBookCatalog(book) if book is not None else None,
+                history=self.step_history,
+                goal=lambda: self._planner_goal,
+                mailbox=self.proposals,
+                should_plan=self._planner_may_plan,
             )
         except ValueError as exc:
             self.planner_enabled_var.set(False)
@@ -1386,24 +1500,344 @@ class PersonalGameAIApp:
         self.planner_status_var.set(
             f"Planner: enabled ({config.ollama.model}, every {config.interval_seconds:g}s)."
         )
-        self.log(
-            "LLM planner ENABLED. It can only enable or disable existing rules; "
-            "input control still gates every dispatch."
-        )
+        if book is None:
+            scope = "No profile is loaded, so it can only enable or disable existing rules."
+        else:
+            scope = (
+                "It can enable or disable rules and propose one enabled skill at a time; "
+                "each proposal waits for Approve unless auto mode is on."
+            )
+        self.log(f"LLM planner ENABLED. {scope} Input control still gates every dispatch.")
 
     def _reset_planner_last_cycle(self):
         """Invalidate pending cycle reports and clear the last-cycle label (Tk thread)."""
         self._planner_generation += 1
         self.planner_last_cycle_var.set(PLANNER_NO_CYCLE_TEXT)
 
-    def _schedule_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
-        """Called on the planner thread; marshal the report onto Tk's event loop."""
-        if self._closing:
+    def _queue_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
+        """Called on the planner thread; queue the report for _poll_preview."""
+        if not self._closing:
+            self._planner_queue.put(("cycle", generation, report))
+
+    def _drain_planner_queue(self):
+        while True:
+            try:
+                kind, generation, payload = self._planner_queue.get_nowait()
+            except queue.Empty:
+                return
+            if kind == "log":
+                self.log(f"Planner: {payload}")
+            elif isinstance(payload, PlannerCycleReport):
+                self._show_planner_cycle_report(generation, payload)
+
+    # ---------------- Planner steps (v0.7) ----------------
+
+    def _planner_may_plan(self) -> bool:
+        """Scheduler-thread gate: skip the LLM call while a step is pending or a skill runs.
+
+        Reads only thread-safe state (mailbox, executor), never a Tk variable.
+        """
+        return not self.proposals.occupied and not self.executor.busy
+
+    def _sync_planner_goal(self, *_args):
+        """Tk trace on the Goal field: keep the plain-str copy the planner reads."""
+        self._planner_goal = self.planner_goal_var.get().strip()[:MAX_GOAL_LENGTH]
+
+    def _parse_auto_max_steps(self) -> int:
+        try:
+            value = int(self.planner_auto_steps_var.get().strip())
+        except ValueError:
+            raise ValueError(
+                f"Auto max steps must be a whole number from 1 to {HARD_MAX_AUTO_STEPS}."
+            ) from None
+        return validate_auto_max_steps(value)
+
+    def _planner_config_to_save(self) -> PlannerConfig:
+        """The loaded profile's planner block with the current Goal and auto max steps."""
+        base = self.profile.planner if self.profile is not None else PlannerConfig()
+        return replace(
+            base,
+            goal=self.planner_goal_var.get().strip(),
+            auto_max_steps=self._parse_auto_max_steps(),
+        )
+
+    def _set_planner_mode(self):
+        """Radio buttons: approve is always allowed; auto needs input, a planner and a yes."""
+        if self.planner_mode_var.get() != "auto":
+            self._disarm_auto("you chose approve mode")
+            return
+        if self.autopilot.mode == "auto":
+            return
+
+        def refuse(message: str):
+            self.planner_mode_var.set("approve")
+            messagebox.showwarning("Auto mode", message)
+
+        if not self.input.enabled:
+            refuse("Enable keyboard/mouse control first.")
+            return
+        if not self.planner.is_running:
+            refuse("Enable the LLM planner first.")
+            return
+        if self.skill_book is None:
+            refuse("Load a profile first; auto mode runs only its enabled skills.")
             return
         try:
-            self.root.after(0, self._show_planner_cycle_report, generation, report)
-        except (tk.TclError, RuntimeError):
-            pass
+            max_steps = self._parse_auto_max_steps()
+        except ValueError as exc:
+            refuse(str(exc))
+            return
+        target = self._planner_target_hwnd()
+        if target is None:
+            refuse("Select a game window first.")
+            return
+        generation, book = self.planner.generation, self.skill_book
+        if not messagebox.askyesno(
+            "Auto mode",
+            f"The planner will run up to {max_steps} enabled skills without asking you. "
+            f"Auto mode turns off after {max_steps} steps, after "
+            f"{MAX_CONSECUTIVE_FAILURES} failed or blocked steps in a row, and on F8, "
+            "input off, profile load, Clear Rules or planner off. Skills only run "
+            "while the game window is in the foreground.\n\nTurn auto mode on?",
+        ):
+            self.planner_mode_var.set("approve")
+            return
+        # The dialog runs the Tk loop, so F8, input off, a planner restart, a
+        # profile load or another window may have happened meanwhile.
+        if (
+            not self.input.enabled
+            or not self.planner.is_running
+            or self.planner.generation != generation
+            or self.skill_book is not book
+            or self._planner_target_hwnd() != target
+        ):
+            self.planner_mode_var.set("approve")
+            self.log("Auto mode NOT turned on: something changed while the confirmation was open.")
+            self._refresh_planner_panel()
+            return
+        self.autopilot.arm_auto(max_steps)
+        self._auto_hwnd = target
+        self.log(
+            f"Auto mode ON: up to {max_steps} planner steps without approval. "
+            "Press F8 to stop everything."
+        )
+        # One focus change caused by this confirmation, like Run; auto steps
+        # themselves never move the focus.
+        try:
+            if not focus_window(target, settle_seconds=0.15):
+                self.log("Windows did not confirm the game window is in the foreground.")
+        except Exception as exc:
+            self.log(f"Could not focus the game window: {exc}")
+        self._refresh_planner_panel()
+
+    def _planner_target_hwnd(self) -> int | None:
+        """The window a planner step aims at: the captured one, else the selected one."""
+        try:
+            return self.capture.hwnd if self.capture else self.selected_hwnd()
+        except Exception:
+            return None
+
+    def _disarm_auto(self, why: str):
+        reason = self.autopilot.disarm(why)
+        self._auto_hwnd = None
+        self.planner_mode_var.set("approve")
+        if reason is not None:
+            self.log(f"Auto mode OFF because {reason}.")
+        self._refresh_planner_panel()
+
+    def _reset_planner_steps(self, why: str):
+        """Planner stopped: auto off, pending proposal dropped, mailbox empty."""
+        self._disarm_auto(why)
+        dropped = self.autopilot.reset()
+        self.proposals.clear()
+        self._planner_decision = None
+        self._planner_intent = None
+        if dropped is not None:
+            self.log(f"Planner proposal '{dropped.skill_name}' dropped because {why}.")
+        self._refresh_planner_panel()
+
+    def _poll_planner_proposals(self):
+        """Tk loop: expire a stale pending proposal, then take and offer a new one."""
+        now = time.monotonic()
+        expired = self.autopilot.expire(now)
+        if expired is not None:
+            self.log(
+                f"Planner proposal '{expired.skill_name}' expired "
+                f"(not approved within {DEFAULT_TTL_SECONDS:g}s)."
+            )
+            self._finish_planner_step(expired, "expired", "not approved in time", None)
+
+        proposal = self.proposals.take()
+        if proposal is not None:
+            self._offer_planner_proposal(proposal, now)
+        self._refresh_planner_panel(now)
+
+    def _offer_planner_proposal(self, proposal: SkillProposal, now: float):
+        if not self.planner.is_running or proposal.generation != self.planner.generation:
+            # From a stopped or replaced planner: never shown, never run.
+            self.proposals.release()
+            return
+        if now - proposal.created_at > DEFAULT_TTL_SECONDS:
+            # Posted long ago (the Tk loop was stalled): too old to show or run.
+            self.log(f"Planner proposal '{proposal.skill_name}' expired before it was shown.")
+            self._finish_planner_step(proposal, "expired", "too old when offered", None)
+            return
+        result = self.autopilot.offer(proposal, now)
+        if result is OfferResult.DROPPED:
+            self.proposals.release()
+            self.log(f"Planner proposal '{proposal.skill_name}' dropped: a step is in progress.")
+        elif result is OfferResult.EXECUTE:
+            self._run_planner_step(proposal, "auto")
+        else:
+            self.log(
+                f"Planner proposes '{proposal.skill_name}': {proposal.reason} "
+                f"(Approve or Reject within {DEFAULT_TTL_SECONDS:g}s)."
+            )
+
+    def approve_planner_proposal(self):
+        proposal = self.autopilot.approve(time.monotonic())
+        if proposal is None:
+            # Nothing pending, or it just expired (logged by the next poll).
+            self._refresh_planner_panel()
+            return
+        self._run_planner_step(proposal, "approved")
+
+    def reject_planner_proposal(self):
+        proposal = self.autopilot.reject()
+        if proposal is None:
+            return
+        self.log(f"Planner proposal '{proposal.skill_name}' rejected.")
+        self._finish_planner_step(proposal, "rejected", "rejected by the user", None)
+
+    def _run_planner_step(self, proposal: SkillProposal, decision: Decision):
+        """Submit an approved or auto proposal like a Run: same checks, fresh intent.
+
+        The skill must still be enabled in the loaded profile, and the
+        dispatcher still applies every gate (input, allowlist, foreground,
+        rate limit). Only an approval (a click in this app) focuses the game;
+        auto mode never moves the focus.
+        """
+        name = proposal.skill_name
+        self._planner_decision = decision
+        refusal = self._planner_step_refusal(proposal)
+        hwnd = None
+        window_changed = False
+        if refusal is None:
+            try:
+                hwnd = self.capture.hwnd if self.capture else self.selected_hwnd()
+                if decision == "auto":
+                    # Auto runs only in the window it was confirmed for, and
+                    # never moves the focus: click skills need it too.
+                    if hwnd != self._auto_hwnd:
+                        window_changed = True
+                        refusal = "The game window changed after auto mode was confirmed."
+                    elif isinstance(self.skill_book.get(name), ClickSkill) and not (
+                        is_foreground(hwnd)
+                    ):
+                        refusal = "Auto click skills need the game window in the foreground."
+                elif not focus_window(hwnd, settle_seconds=0.15):
+                    self.log("Windows did not confirm the game window is in the foreground.")
+            except Exception as exc:
+                refusal = str(exc)
+        if refusal is None:
+            # Rebuilt after focusing so the intent is fresh and re-checked.
+            built = self.skill_book.build_intent(name, self.game_state, source=PLANNER_SOURCE)
+            if built.intent is None:
+                refusal = f"{built.reason}."
+            else:
+                refusal = self.executor.submit(built.intent, hwnd=hwnd, source=PLANNER_SOURCE)
+        if refusal is not None:
+            self._skill_blocked(name, PLANNER_SOURCE, refusal)
+            self._planner_step_finished(False, f"refused: {refusal}", decision="refused")
+            if window_changed:
+                self._disarm_auto("the game window changed")
+            return
+        self._planner_intent = built.intent
+        self._running_skill = name
+        self._set_skill_result(name, "running…")
+        self.log(f"Skill '{name}' started (planner, {decision}): {proposal.reason}")
+        self._refresh_planner_panel()
+
+    def _planner_step_refusal(self, proposal: SkillProposal) -> str | None:
+        """Checks that need no focus change, in the same order as run_skill."""
+        if not self.planner.is_running or proposal.generation != self.planner.generation:
+            return "The planner is no longer running."
+        name = proposal.skill_name
+        book = self.skill_book
+        if book is None or book.get(name) is None:
+            return "The skill is not in the loaded profile."
+        if not self.input.enabled:
+            return "Input control is disabled."
+        if self.executor.busy:
+            return "Busy: another skill is running."
+        if isinstance(book.get(name), ClickSkill) and self.capture is None:
+            return "Start Capture first; click skills aim at captured detections."
+        built = book.build_intent(name, self.game_state, source=PLANNER_SOURCE)
+        if built.intent is None:
+            return f"{built.reason}."
+        return None
+
+    def _planner_step_finished(self, ok: bool, outcome: str, *, decision: Decision | None = None):
+        """Record the running planner step's result; auto may turn itself off."""
+        proposal = self.autopilot.running
+        if proposal is None:
+            # The planner was stopped while the skill ran; nothing to record.
+            return
+        decision = decision or self._planner_decision or "approved"
+        auto_off = self.autopilot.record_result(ok)
+        self._finish_planner_step(proposal, decision, outcome, ok if decision != "refused" else None)
+        if auto_off is not None:
+            self._auto_hwnd = None
+            self.planner_mode_var.set("approve")
+            self.log(f"Auto mode OFF: {auto_off}.")
+            self._refresh_planner_panel()
+
+    def _finish_planner_step(
+        self, proposal: SkillProposal, decision: Decision, outcome: str, ok: bool | None
+    ):
+        """Feed the step back to the planner and free the mailbox for the next one."""
+        self.step_history.append(
+            StepRecord(proposal.skill_name, proposal.reason, decision, outcome, ok, time.monotonic())
+        )
+        self._planner_decision = None
+        self.proposals.release()
+        self._refresh_planner_panel()
+
+    def _refresh_planner_panel(self, now: float | None = None):
+        now = time.monotonic() if now is None else now
+        autopilot = self.autopilot
+        if autopilot.mode == "auto":
+            mode_text = f"Mode: AUTO · {autopilot.steps_taken}/{autopilot.max_steps} steps."
+        else:
+            mode_text = PLANNER_APPROVE_MODE_TEXT
+        pending, running = autopilot.pending, autopilot.running
+        if pending is not None:
+            proposal_text = (
+                f"Proposal: {pending.skill_name} — {self._short(pending.reason)} · "
+                f"{math.ceil(autopilot.seconds_left(now))}s left"
+            )
+        elif running is not None:
+            proposal_text = f"Running: {running.skill_name} — {self._short(running.reason)}"
+        else:
+            proposal_text = PLANNER_NO_PROPOSAL_TEXT
+        if self.planner_mode_status_var.get() != mode_text:
+            self.planner_mode_status_var.set(mode_text)
+        if self.planner_proposal_var.get() != proposal_text:
+            self.planner_proposal_var.set(proposal_text)
+        state = ["!disabled"] if pending is not None else ["disabled"]
+        for button in (
+            getattr(self, "planner_approve_button", None),
+            getattr(self, "planner_reject_button", None),
+        ):
+            if button is not None:
+                button.state(state)
+
+    @staticmethod
+    def _short(text: str) -> str:
+        text = " ".join(text.split())
+        if len(text) > PLANNER_MESSAGE_MAX_CHARS:
+            return text[: PLANNER_MESSAGE_MAX_CHARS - 1] + "…"
+        return text
 
     def _show_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
         if self._closing or generation != self._planner_generation:
@@ -1632,6 +2066,8 @@ class PersonalGameAIApp:
         self._drain_recording_status()
         self._sync_recording_state()
         self._drain_skill_runs()
+        self._drain_planner_queue()
+        self._poll_planner_proposals()
 
         if self.capture:
             frame = self.capture.latest_frame()

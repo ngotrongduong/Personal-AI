@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- No integration branch is active: v0.6.0 (`feature/v0.6-profiles-skills`, Issue #50) is released into `main`. The next milestone (v0.7) starts its own `feature/*` branch from `main`.
+- No integration branch is active: v0.7.0 (`feature/v0.7-closed-loop-planner`, Issue #61) is released into `main`. The next milestone (v0.8) starts its own `feature/*` branch from `main`; its sub-task PRs target that branch, and it merges into `main` as a merge commit at release.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,10 +94,24 @@ feature/<milestone>
 
 ## Current priority
 
-v0.6 "Game Profiles + Skills" (Issue #50) on `feature/v0.6-profiles-skills`.
-It is the first step toward v1.0: v0.6 profiles + skills, then v0.7 a planner
-that picks skills, then v0.8 memory, then v1.0. Read `docs/PLAN.md`'s design
-constraint section before implementing anything here.
+v0.8 "Session memory" is next (not started; it needs its own tracking issue,
+integration branch and `docs/PLAN.md`). It is the third step toward v1.0:
+v0.6 profiles + skills and v0.7 a planner that picks skills (both released),
+then v0.8 a structured session log plus bounded, user-editable notes written by
+the LLM, then v1.0. Memory can never widen permissions. Write the v0.8 design
+constraint section in `docs/PLAN.md` before implementing anything here.
+
+Planner invariant (permanent, from v0.7):
+- The LLM directive `run_skill` carries only a skill *name* and a display-only
+  reason, and the skill must be enabled.
+- Only the Tk thread submits a planner step to the `SkillExecutor`, after
+  rebuilding the intent from fresh state. The planner thread only posts
+  proposals to a single-slot mailbox.
+- Approve-each-step is the default, and a proposal older than its 10 s TTL
+  never runs. Auto mode is opt-in, never persisted, pinned to the window it
+  was confirmed for, step-capped (hard cap 100), and turns off on F8, input
+  off, profile load, Clear Rules, planner off, or 3 failed steps in a row.
+- No LLM call is made while a proposal is pending or a skill is running.
 
 Skill invariant (permanent, from v0.6):
 - `ActionDispatcher` is the only path from a skill to `InputController`.

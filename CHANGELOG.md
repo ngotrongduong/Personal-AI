@@ -2,6 +2,56 @@
 
 All notable project changes are tracked here.
 
+## v0.7.0 — Closed-loop planner
+
+- The Ollama planner can now propose running one skill from the loaded
+  profile: `{"type": "run_skill", "skill": "<name>", "reason": "..."}`.
+  - It picks a skill **name** only. Keys, coordinates and durations always
+    come from the profile.
+  - The skill must exist and be enabled. Extra fields, unknown or disabled
+    skills and bad reasons are rejected.
+  - `enable_rule` / `disable_rule` / `noop` from v0.4 are kept and still apply
+    directly, because they send no input.
+- **Closed loop:** each prompt carries the goal, the observations, the enabled
+  skills, the rules and the last 5 steps with their decision and outcome.
+- The **Planner** panel gained:
+  - a **Goal** field;
+  - a mode choice, **Approve each step** (the default) or **Auto**, with a
+    step counter;
+  - a proposal line with **Approve** / **Reject** buttons and a countdown.
+- In approve mode nothing runs until you click Approve. A proposal expires
+  after 10 s.
+- **Auto mode** is an explicit opt-in.
+  - It needs input control on and a confirmation, and it is never saved.
+    Every start, profile load and F8 returns to approve mode.
+  - Auto steps run only in the window that was confirmed, and click skills
+    also need it in the foreground.
+  - Auto turns itself off after `auto_max_steps` steps (default 20, hard cap
+    100), after 3 refused, BLOCKED or failed steps in a row, on F8, when input
+    control goes off, on profile load, on Clear Rules and when the planner is
+    turned off.
+- One step at a time: the planner thread only posts proposals to a
+  single-slot mailbox, and only the Tk thread submits the skill, after
+  rebuilding it from fresh state. The dispatcher's gates are unchanged.
+  - No Ollama request is made while a proposal is pending or a skill is
+    running.
+  - Each planner start gets a new generation, and proposals from a stopped
+    planner are dropped.
+- F8 now also drops the pending proposal and turns auto off. The order is
+  unchanged: release input, cancel the skill, stop the planner, stop
+  recording.
+- Profiles gained `planner.goal` (up to 500 characters) and
+  `planner.auto_max_steps` (1–100). Load fills the Goal field and Save writes
+  both.
+- Planner reports and log lines now reach the UI through a queue drained on
+  the Tk thread instead of `root.after` from the scheduler thread.
+- Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`:
+  - approve, reject and expiry;
+  - no Ollama request while a proposal was pending;
+  - the auto step cap and the 3-failures stop;
+  - F8 during auto;
+  - a Save → Load round trip of the goal and step cap.
+
 ## v0.6.0 — Game Profiles + Skills
 
 - Added runtime game profiles: `profiles/<name>/profile.json` plus

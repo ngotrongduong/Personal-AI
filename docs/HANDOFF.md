@@ -16,12 +16,71 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-24)
+## Right now (2026-09-25)
+
+**v0.7.0 "Closed-loop planner" (Issue #61) is released.** The integration
+branch `feature/v0.7-closed-loop-planner` merged into `main` via PR #63 as a
+merge commit, which closed Issue #61. `main` has `APP_VERSION = "0.7.0"`.
+
+**Next: v0.8 "Session memory"** (not started): a structured JSONL log of each
+session plus bounded, user-editable notes written by the LLM; memory can never
+widen permissions. It needs a kickoff first: a tracking issue, a
+`feature/v0.8-…` branch from `main`, the `docs/PLAN.md` spec and design
+constraint, and a draft release PR. See "Next task" below.
+
+### v0.7 history (for reference)
+
+Built on `feature/v0.7-closed-loop-planner`, branched from `main` at the
+v0.6.0 release. Task 0 (kickoff: issue, branch, `docs/PLAN.md` spec, `AGENTS.md` planner
+invariant, draft PR #63 feature→`main`) and task 1 (`run_skill`
+directive, closed-loop prompt, `StepHistory`, `ProposalMailbox`) and task 2
+(`Autopilot` approve/auto state machine) and task 3 (scheduler `should_plan`
+gate, cancellable proposal sink with a generation per start; `stop()` clears
+the mailbox; safety-reviewer passed) and task 4 (`planner.goal` /
+`planner.auto_max_steps` in `PlannerConfig`, the loader and `save_profile`)
+and task 5 (the UI Planner panel: Goal field, approve/auto mode, proposal line
+with Approve/Reject and a 10 s TTL, executor wiring, auto-off triggers, F8
+order, planner reports and logs through a queue drained in `_poll_preview`;
+safety-reviewer PASS WITH NOTES, and its findings were fixed: auto is re-checked
+after its confirmation dialog so F8 pressed meanwhile wins, auto steps run only
+in the window auto was confirmed for, auto click skills need that window in the
+foreground, proposals older than the TTL are never shown, and a step re-checks
+the planner generation; PR #68) are done. Task 6, the live Notepad smoke test
+with Ollama `qwen3.5:9b`, passed all 9 acceptance criteria on 2026-09-25
+(details in `docs/PLAN.md` "Smoke test results"):
+- Approve typed exactly one "x";
+- Reject and the 10 s expiry both worked;
+- no Ollama call ran while a proposal was pending;
+- auto stopped at its cap of 3;
+- BLOCKED ×3 turned auto off;
+- F8 stopped everything;
+- `goal` / `auto_max_steps` survived a Save/Load.
+
+Task 6's results landed via PR #69. Task R (release close-out: CHANGELOG,
+README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, the
+`setup.ps1` / `check_system.ps1` banners) followed, then PR #63 closed Issue
+#61.
+
+Local leftover branches are safe for the user to delete (Claude avoids
+`git branch -D`): `claude/v0.7-kickoff`, `claude/v0.7-planner-core`,
+`claude/v0.7-autopilot`, `claude/v0.7-scheduler-gate`,
+`claude/v0.7-planner-profile`, `claude/v0.7-planner-panel`,
+`claude/v0.7-smoke-test`, `claude/v0.7-release`, and the older v0.3–v0.6 ones
+listed below and in `git branch`.
+
+The user approved the design on 2026-09-24:
+- the LLM proposes `run_skill` with a skill name only;
+- approve-each-step is the default, and auto mode is opt-in with a step cap and
+  auto-off triggers;
+- a Goal field is saved as `planner.goal`;
+- v0.4 rule toggles are kept and still apply directly.
+
+Codex's CLI was out of quota until 2026-09-25 13:55, so Claude implemented
+all of v0.7.
 
 **v0.6.0 "Game Profiles + Skills" (Issue #50) is released.** The
 integration branch `feature/v0.6-profiles-skills` merged into `main` via PR #52
-as a merge commit. Next is v0.7, the closed-loop planner, which needs its own
-kickoff (issue, `feature/*` branch, `docs/PLAN.md`).
+as a merge commit (`f1cc71c`).
 The user chose to move toward v1.0 in steps:
 - v0.6 profiles + skills, no LLM;
 - v0.7 a closed-loop planner that picks skill *names* only, approve-each-step
@@ -294,10 +353,20 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 kickoff: the closed-loop planner, where the LLM picks a skill *name* from
-the loaded profile, each step is approved by default, and an explicit opt-in
-auto mode exists. See `docs/ROADMAP.md`. Never commit a recording, a profile template PNG or any
-other user data, because the repo is public.
+v0.8 kickoff ("Session memory"), following the v0.7 kickoff pattern:
+- open a tracking issue with the goal, safety boundary and checklist;
+- create `feature/v0.8-session-memory` from `main`;
+- replace `docs/PLAN.md` with the v0.8 spec and design constraint (the v0.7
+  plan stays in git history), and update `AGENTS.md` and this file;
+- open a draft release PR feature→`main`.
+
+Settle the design with the user before implementing: the log format and
+where it lives (gitignored, like `recordings/`), how notes are bounded and
+edited, and that memory never widens permissions or enables skills.
+Codex's quota resets 2026-09-25 13:55; pure-logic tasks can go to Codex again.
+
+Never commit a recording, a profile template PNG or any other user data,
+because the repo is public.
 
 Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set
 implicitly by importing `dxcam`. Calling `SetProcessDpiAwareness(2)` explicitly
@@ -307,11 +376,9 @@ Ollama and `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
 - an optional directive `reason` field;
-- a cancelled worker can linger on HTTP after a fast disable/re-enable;
-- the planner's `_schedule_planner_cycle_report` and `_PlannerLogHandler` call
-  `root.after` from the scheduler thread, which can block that thread while the
-  Tk thread is busy or closing; the Recording panel (v0.5 task 5) uses a
-  `SimpleQueue` drained by `_poll_preview` instead, and the planner could too.
+- a cancelled worker can linger on HTTP after a fast disable/re-enable.
+(The `root.after` calls from the planner thread were replaced by a queue
+drained in `_poll_preview` in v0.7 task 5.)
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
@@ -332,8 +399,8 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-None. Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3)
-and Issue #4 are all completed and closed.
+None. Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons
 
@@ -343,6 +410,14 @@ and Issue #4 are all completed and closed.
 - A PR that merges `main` into an integration branch must land as a merge
   commit, not a squash. Otherwise `main` is not an ancestor, and the release PR
   hits the same conflicts again.
+- Live GUI smoke tests driven by Claude desktop's computer use: the Claude
+  window is a full-screen topmost layered overlay, so mouse clicks sometimes
+  land on it instead of the Tk app. Button clicks are unreliable there; a press
+  on an entry or combobox usually works. Keys always go to the foreground
+  window. Drive the app with Tab / Shift+Tab and Space, and check the focus
+  ring with a zoom before pressing Space. Remember that Approve and the auto
+  confirmation focus the game window. After them, keys go to the game until
+  the app is focused again.
 
 ## Longer-term plan
 
