@@ -29,7 +29,7 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "0.2.0"
+APP_VERSION = "0.4.0"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
 PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
 PLANNER_MESSAGE_MAX_CHARS = 100
@@ -180,7 +180,7 @@ class PersonalGameAIApp:
             controls, text="EMERGENCY STOP (F8)", command=self.emergency_stop
         ).pack(side="right")
 
-        vision_box = ttk.LabelFrame(outer, text="Vision v0.2 — Template detector")
+        vision_box = ttk.LabelFrame(outer, text="Vision v0.3 — Template + named detectors")
         vision_box.pack(fill="x", pady=(4, 8))
 
         vision_row = ttk.Frame(vision_box)
@@ -347,7 +347,7 @@ class PersonalGameAIApp:
         self.logbox.pack(fill="x", padx=6, pady=6)
 
         self.log("F8 global emergency stop armed.")
-        self.log("Vision v0.2 ready. Input control starts DISABLED.")
+        self.log("Vision v0.3 ready. Input control starts DISABLED.")
 
     # ---------------- Logging ----------------
 

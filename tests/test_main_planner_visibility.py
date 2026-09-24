@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import gc
 import time
 import tkinter as tk
 import unittest
@@ -39,6 +40,13 @@ class MainPlannerVisibilityTests(unittest.TestCase):
     def tearDown(self) -> None:
         self.app.capture = None
         self.app.close()
+        # The app's Tk variables live in reference cycles. Collect them here on
+        # the main thread; otherwise a later test's background thread can end
+        # up finalizing them, and tkinter then stalls ~1s waiting for a
+        # mainloop before raising "main thread is not in main loop".
+        del self.app
+        del self.root
+        gc.collect()
 
     def test_current_generation_report_updates_label(self) -> None:
         generation = self.app._planner_generation

@@ -1,6 +1,28 @@
-# Personal Game AI v0.2.0
+# Personal Game AI v0.4.0
 
-This release adds the first real computer-vision layer.
+Current release: **v0.4 — Local AI Planner**. See `CHANGELOG.md` for the full
+history and `docs/ARCHITECTURE.md` for the runtime design.
+
+## v0.4 at a glance
+
+- **v0.3 fast loop** (unchanged): DXcam frame → named detectors / bars / OCR →
+  `GameState` → deterministic `RuleEngine` → gated `ActionDispatcher` → input.
+  Input control starts disabled; F8 is a global emergency stop.
+- **v0.4 planner** (optional, off by default): a local Ollama model
+  (default `qwen3.5:9b`) looks at the game state every few seconds and may only
+  enable/disable named rules or do nothing. It can never press keys or click;
+  if Ollama is missing, slow, or returns nonsense, rules stay as they were.
+  Enable it from the **Planner (Ollama)** panel; the panel shows the last
+  cycle's time, latency, status and outcome.
+
+To use the planner, install Ollama and pull the model first:
+
+```powershell
+ollama pull qwen3.5:9b
+```
+
+The sections below describe the original v0.2 vision workflow, which still
+applies.
 
 ## Stage 1 features retained
 
@@ -66,12 +88,7 @@ Use automation with offline/single-player games or games whose rules permit it.
 This project does not include anti-cheat bypassing, memory injection, packet manipulation,
 or protected-process evasion.
 
-## Next milestone — v0.3
+## Next milestone — v0.5
 
-- Multiple named detectors
-- UI regions
-- HP/resource bar detection
-- OCR
-- Game-state variables
-- Rules such as:
-  `IF CollectButton.visible THEN click(CollectButton.center)`
+Demonstration recording: capture screen state plus the user's actions to build
+datasets for repeatable tasks. See `docs/ROADMAP.md`.
