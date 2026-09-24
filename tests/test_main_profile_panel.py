@@ -185,7 +185,7 @@ class MainProfilePanelTests(unittest.TestCase):
         self.assertIsNone(self.app.game_state.get("stale"))
         self.assertTrue(self.app.vision_enabled_var.get())
         self.assertIn("Notepad demo", self.app.profile_status_var.get())
-        self.assertIn("1 enabled", self.app.profile_status_var.get())
+        self.assertIn("1 enabled in file", self.app.profile_status_var.get())
         self.messagebox.showerror.assert_not_called()
 
     def test_load_refused_while_input_control_is_on(self) -> None:
