@@ -80,6 +80,9 @@ class SchedulerGateTests(unittest.TestCase):
         gate.open = True
 
         self.assertTrue(planner.called.wait(2.0))
+        deadline = time.monotonic() + 2.0
+        while not self.reports and time.monotonic() < deadline:
+            time.sleep(0.01)
         self.assertGreaterEqual(len(self.reports), 1)
 
     def test_raising_gate_fails_closed(self) -> None:
