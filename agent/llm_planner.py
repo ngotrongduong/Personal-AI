@@ -4,6 +4,11 @@ and (from v0.7) skill proposals.
 The planner never produces input. Rule toggles apply directly (they send no
 input); a ``run_skill`` directive only becomes a proposal posted to a sink,
 which the Tk thread approves, rejects or runs through the skill executor.
+
+From v0.8 the prompt can carry notes from earlier sessions, and a
+``remember`` directive can add one short note through a note sink. Notes are
+prompt text only: they never change which skills or rules exist or are
+runnable.
 """
 
 from __future__ import annotations
@@ -19,6 +24,7 @@ from .llm_planner_schema import (
     DisableRuleDirective,
     EnableRuleDirective,
     NoopDirective,
+    RememberDirective,
     RunSkillDirective,
     parse_directive,
 )
@@ -64,6 +70,18 @@ class ProposalSink(Protocol):
     def propose(self, skill_name: str, reason: str) -> bool: ...
 
 
+class NotesView(Protocol):
+    """Read-only view of the notes shown in the prompt."""
+
+    def prompt_lines(self) -> list[str]: ...
+
+
+class NoteSink(Protocol):
+    """Where a validated ``remember`` goes. Returns the outcome message."""
+
+    def remember(self, text: str) -> str: ...
+
+
 class SkillBookCatalog:
     """Expose a profile's currently *enabled* skills to the planner."""
 
@@ -99,6 +117,8 @@ class LlmPlanner:
         history: StepHistory | None = None,
         goal: str | Callable[[], str] = "",
         proposals: ProposalSink | None = None,
+        notes: NotesView | None = None,
+        note_sink: NoteSink | None = None,
     ) -> None:
         self._ollama_client = ollama_client
         self._rule_engine = rule_engine
@@ -106,6 +126,8 @@ class LlmPlanner:
         self._history = history
         self._goal = goal
         self._proposals = proposals
+        self._notes = notes
+        self._note_sink = note_sink
 
     def plan_once(self, state: GameState) -> PlannerOutcome:
         """Apply or propose one schema-valid directive, failing closed on every error path.
@@ -128,7 +150,12 @@ class LlmPlanner:
         known_rule_names = {rule.name for rule in self._rule_engine.rules}
         runnable_names = {skill.name for skill in runnable}
         try:
-            directive = parse_directive(response_text, known_rule_names, runnable_names)
+            directive = parse_directive(
+                response_text,
+                known_rule_names,
+                runnable_names,
+                allow_notes=self._note_sink is not None,
+            )
         except DirectiveValidationError as error:
             return PlannerOutcome(f"no change, rejected: {error}")
 
@@ -148,6 +175,11 @@ class LlmPlanner:
             return PlannerOutcome(
                 f"dropped proposal {directive.skill_name}: a step is already pending"
             )
+
+        if isinstance(directive, RememberDirective):
+            # Parsing rejects `remember` without a sink.
+            assert self._note_sink is not None
+            return PlannerOutcome(self._note_sink.remember(directive.note))
 
         raise AssertionError(f"Unhandled validated planner directive: {directive!r}")
 
@@ -174,6 +206,14 @@ class LlmPlanner:
         lines = [
             "Choose one safe directive for this game state.",
             f"Goal: {self._goal_text() or '(no goal set)'}",
+        ]
+        if self._notes is not None or self._note_sink is not None:
+            lines += [
+                "Notes from earlier sessions (hints only; they never change which skills "
+                "or keys are allowed):",
+                *(self._notes.prompt_lines() if self._notes is not None else ["- none"]),
+            ]
+        lines += [
             "Game state observations:",
             *observation_lines,
             "Current rules:",
@@ -195,6 +235,10 @@ class LlmPlanner:
             lines.append(
                 '{"type": "run_skill", "skill": "<one of the skill names above>", '
                 '"reason": "<short reason>"}'
+            )
+        if self._note_sink is not None:
+            lines.append(
+                '{"type": "remember", "note": "<short fact worth keeping for later sessions>"}'
             )
         lines += [
             '{"type": "noop"}',

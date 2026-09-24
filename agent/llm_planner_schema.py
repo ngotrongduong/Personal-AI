@@ -39,11 +39,27 @@ class RunSkillDirective:
     reason: str
 
 
+@dataclass(frozen=True, slots=True)
+class RememberDirective:
+    """Ask to keep one short note for later sessions (v0.8).
+
+    The note is plain prompt text. It is never parsed for commands and can
+    never change skills, keys, rules or permissions.
+    """
+
+    note: str
+
+
 PlannerDirective: TypeAlias = (
-    EnableRuleDirective | DisableRuleDirective | NoopDirective | RunSkillDirective
+    EnableRuleDirective
+    | DisableRuleDirective
+    | NoopDirective
+    | RunSkillDirective
+    | RememberDirective
 )
 
 MAX_REASON_LENGTH = 200
+MAX_NOTE_LENGTH = 200
 
 
 class DirectiveValidationError(ValueError):
@@ -54,12 +70,15 @@ def parse_directive(
     raw: str,
     known_rule_names: Collection[str],
     runnable_skill_names: Collection[str] = (),
+    *,
+    allow_notes: bool = False,
 ) -> PlannerDirective:
     """Parse one JSON directive and reject every shape outside the closed schema.
 
     ``run_skill`` is accepted only for a name in ``runnable_skill_names`` (the
     loaded profile's currently enabled skills); with the default empty
-    collection every ``run_skill`` is rejected.
+    collection every ``run_skill`` is rejected. ``remember`` is accepted only
+    when ``allow_notes`` is True (the profile's ``planner.llm_notes``).
     """
 
     if not isinstance(raw, str):
@@ -87,6 +106,9 @@ def parse_directive(
             _validated_skill_name(value["skill"], runnable_skill_names),
             _validated_reason(value["reason"]),
         )
+    if directive_type == "remember" and allow_notes:
+        _require_exact_fields(value, {"type", "note"})
+        return RememberDirective(_validated_text(value["note"], "note", MAX_NOTE_LENGTH))
 
     if not isinstance(directive_type, str):
         raise DirectiveValidationError("Planner directive 'type' must be a string.")
@@ -114,14 +136,18 @@ def _validated_skill_name(skill: object, runnable_skill_names: Collection[str]) 
 
 
 def _validated_reason(reason: object) -> str:
-    if not isinstance(reason, str):
-        raise DirectiveValidationError("Planner directive 'reason' must be a string.")
-    cleaned = "".join(ch if ch.isprintable() else " " for ch in reason).strip()
+    return _validated_text(reason, "reason", MAX_REASON_LENGTH)
+
+
+def _validated_text(text: object, field: str, max_length: int) -> str:
+    if not isinstance(text, str):
+        raise DirectiveValidationError(f"Planner directive '{field}' must be a string.")
+    cleaned = "".join(ch if ch.isprintable() else " " for ch in text).strip()
     if not cleaned:
-        raise DirectiveValidationError("Planner directive 'reason' cannot be empty.")
-    if len(cleaned) > MAX_REASON_LENGTH:
+        raise DirectiveValidationError(f"Planner directive '{field}' cannot be empty.")
+    if len(cleaned) > max_length:
         raise DirectiveValidationError(
-            f"Planner directive 'reason' is longer than {MAX_REASON_LENGTH} characters."
+            f"Planner directive '{field}' is longer than {max_length} characters."
         )
     return cleaned
 

@@ -30,7 +30,10 @@ Task 0 (kickoff) is done:
 
 Task 1 (`agent/session_log.py`: strict schema, fail-soft 5 MB-capped writer,
 reader/validator) merged via PR #74. Task 2 (`agent/notes.py`: bounded
-thread-safe `NoteBook`, strict load, atomic save) is done.
+thread-safe `NoteBook`, strict load, atomic save) merged via PR #75. Task 3
+(`remember` directive, Notes section in the prompt, `_CancellableNoteSink`
+in `PlannerController`, import-boundary test) is done; `main.py` does not
+pass `notes` / `allow_notes` yet (task 5).
 
 v0.8 adds a per-planner-session JSONL log and bounded per-profile notes. The
 user edits the notes, and the LLM may add some through a `remember` directive
@@ -368,8 +371,9 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 task 3, the `remember` directive, Notes in the prompt and the
-cancellable note sink, then tasks 4–6 in the order given in
+v0.8 task 4, profile `planner.llm_notes` and `agent/memory_store.py`
+(add `agent/memory_store.py` to `MEMORY_MODULES` in
+`tests/test_memory_boundary.py`), then tasks 5–6 in the order given in
 `docs/PLAN.md`. Each task lands through a `claude/…` or `codex/…` PR into
 `feature/v0.8-session-memory`. Codex's quota resets 2026-09-25 13:55, so
 pure-logic tasks can go to Codex again after that.
