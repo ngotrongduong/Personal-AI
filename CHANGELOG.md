@@ -2,6 +2,33 @@
 
 All notable project changes are tracked here.
 
+## v0.4.0 — Local AI Planner
+
+- Added an optional local LLM planner backed by Ollama (default model
+  `qwen3.5:9b`), off by default.
+- The planner only proposes directives from a closed vocabulary
+  (`enable_rule` / `disable_rule` / `noop`), validated before being applied
+  through `RuleEngine`. It has no path to `ActionIntent`, `ActionDispatcher` or
+  `InputController`; all v0.3 safety gates are unchanged.
+- Planner cycles run on a background thread at a configurable interval and
+  fail closed on connection errors, timeouts, HTTP errors and invalid output.
+- `RuleEngine` gained `enable_rule` / `disable_rule` / `is_rule_enabled` and
+  an `RLock` for safe concurrent use.
+- "Planner (Ollama)" UI panel: enable toggle, model, interval, status, and the
+  last cycle's time, latency, status and outcome. F8, Clear Rules and window
+  close stop the planner; F8 and close release input first.
+- Every planner cycle's outcome is logged.
+- Added the provider-neutral `model_runtime` package and model catalog
+  (`configs/models.v1.json`); models are never auto-downloaded.
+
+## v0.3.0 — Game State + Rules
+
+- Added multiple named detectors per game profile and regions of interest.
+- Added HP/resource bar measurement and basic OCR (Tesseract).
+- Added persistent `GameState` with stale-data handling.
+- Added a deterministic rule engine with cooldowns/debouncing.
+- Added the gated `ActionDispatcher` (`ActionIntent` → `InputController`).
+
 ## v0.2.0 — Vision baseline
 
 - Added live DXcam capture of a selected Windows application.

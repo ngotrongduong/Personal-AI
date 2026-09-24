@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import math
 import threading
 import time
 from pathlib import Path
@@ -14,6 +16,10 @@ import win32gui
 
 from agent.action_dispatcher import ActionDispatcher
 from agent.game_state import GameState
+from agent.ollama_client import OllamaClientConfig
+from agent.planner_config import PlannerConfig
+from agent.planner_controller import PlannerController
+from agent.planner_scheduler import PlannerCycleReport
 from agent.rule_engine import RuleEngine, VisibilityRule
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
@@ -23,7 +29,36 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "0.3.0"
+APP_VERSION = "0.4.0"
+PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
+PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
+PLANNER_MESSAGE_MAX_CHARS = 100
+
+
+class _PlannerLogHandler(logging.Handler):
+    """Forward scheduler-thread planner logs onto Tk's event loop."""
+
+    def __init__(self, app: PersonalGameAIApp) -> None:
+        super().__init__(level=logging.INFO)
+        self._app = app
+
+    def emit(self, record: logging.LogRecord) -> None:
+        try:
+            message = self.format(record)
+        except Exception:
+            self.handleError(record)
+            return
+
+        if self._app._closing:
+            return
+        try:
+            self._app.root.after(0, self._log_if_open, message)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _log_if_open(self, message: str) -> None:
+        if not self._app._closing:
+            self._app.log(f"Planner: {message}")
 
 
 class PersonalGameAIApp:
@@ -48,6 +83,7 @@ class PersonalGameAIApp:
         self._registry_visibility: dict[str, bool] = {}
         self.rule_engine = RuleEngine()
         self.dispatcher = ActionDispatcher(self.input)
+        self.planner = PlannerController(self.game_state)
 
         self.preview_photo = None
         self.preview_image_item = None
@@ -88,7 +124,20 @@ class PersonalGameAIApp:
         self.rule_min_confidence_var = tk.DoubleVar(value=0.82)
         self.rules_var = tk.StringVar(value="Rules: 0 active. Input control still gates every dispatch.")
 
+        self.planner_enabled_var = tk.BooleanVar(value=False)
+        self.planner_model_var = tk.StringVar(value=PLANNER_DEFAULT_MODEL)
+        self.planner_interval_var = tk.StringVar(value="5.0")
+        self.planner_status_var = tk.StringVar(value="Planner: disabled.")
+        self.planner_last_cycle_var = tk.StringVar(value=PLANNER_NO_CYCLE_TEXT)
+        # Bumped on every planner start/stop (Tk thread only) so cycle reports
+        # from a stopped or replaced scheduler are never displayed.
+        self._planner_generation = 0
+
         self._build_ui()
+        self._planner_logger = logging.getLogger("agent.planner_scheduler")
+        self._planner_logger.setLevel(logging.INFO)
+        self._planner_log_handler = _PlannerLogHandler(self)
+        self._planner_logger.addHandler(self._planner_log_handler)
         self.refresh_windows()
         self._start_hotkey_listener()
         self.root.protocol("WM_DELETE_WINDOW", self.close)
@@ -231,6 +280,38 @@ class PersonalGameAIApp:
 
         ttk.Label(
             rules_box, textvariable=self.rules_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+
+        planner_box = ttk.LabelFrame(outer, text="Planner (Ollama)")
+        planner_box.pack(fill="x", pady=(0, 8))
+
+        planner_row = ttk.Frame(planner_box)
+        planner_row.pack(fill="x", padx=8, pady=(7, 4))
+
+        ttk.Checkbutton(
+            planner_row,
+            text="Enable LLM planner",
+            variable=self.planner_enabled_var,
+            command=self._toggle_planner,
+        ).pack(side="left")
+        ttk.Label(planner_row, text="Model:").pack(side="left", padx=(15, 4))
+        ttk.Entry(
+            planner_row, textvariable=self.planner_model_var, width=20
+        ).pack(side="left")
+        ttk.Label(planner_row, text="Interval seconds:").pack(side="left", padx=(15, 4))
+        ttk.Spinbox(
+            planner_row,
+            from_=1.0,
+            to=600.0,
+            increment=0.5,
+            textvariable=self.planner_interval_var,
+            width=7,
+        ).pack(side="left")
+        ttk.Label(
+            planner_box, textvariable=self.planner_status_var
+        ).pack(anchor="w", padx=8, pady=(0, 2))
+        ttk.Label(
+            planner_box, textvariable=self.planner_last_cycle_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
         info = ttk.Frame(outer)
@@ -404,9 +485,17 @@ class PersonalGameAIApp:
             messagebox.showerror("Click", str(exc))
 
     def emergency_stop(self):
+        # Release input first; nothing should delay disabling input.
         self.input.set_enabled(False)
         self.control_var.set(False)
         self.status_var.set("EMERGENCY STOP (F8)")
+        planner_was_running = self.planner.is_running
+        self.planner.stop()
+        self._reset_planner_last_cycle()
+        self.planner_enabled_var.set(False)
+        self.planner_status_var.set("Planner: disabled by emergency stop.")
+        if planner_was_running:
+            self.log("LLM planner stopped by emergency stop.")
         self.log("EMERGENCY STOP: generated inputs released; input control disabled.")
 
     def _start_hotkey_listener(self):
@@ -494,9 +583,84 @@ class PersonalGameAIApp:
         )
 
     def clear_rules(self):
+        planner_was_running = self.planner.is_running
+        self.planner.stop()
+        self._reset_planner_last_cycle()
+        self.planner_enabled_var.set(False)
+        self.planner_status_var.set("Planner: disabled because rules were cleared.")
+        if planner_was_running:
+            self.log("LLM planner stopped because rules were cleared.")
         self.rule_engine = RuleEngine()
         self.rules_var.set("Rules: 0 active.")
         self.log("All rules cleared.")
+
+    def _toggle_planner(self):
+        if not self.planner_enabled_var.get():
+            self.planner.stop()
+            self._reset_planner_last_cycle()
+            self.planner_status_var.set("Planner: disabled.")
+            self.log("LLM planner DISABLED.")
+            return
+
+        try:
+            interval_seconds = float(self.planner_interval_var.get())
+            if not math.isfinite(interval_seconds) or interval_seconds < 1.0:
+                raise ValueError("Planner interval must be a finite value of at least 1.0 seconds.")
+            config = PlannerConfig(
+                enabled=True,
+                ollama=OllamaClientConfig(model=self.planner_model_var.get().strip()),
+                interval_seconds=interval_seconds,
+            )
+            self._reset_planner_last_cycle()
+            generation = self._planner_generation
+            self.planner.start(
+                self.rule_engine,
+                config,
+                on_cycle=lambda report: self._schedule_planner_cycle_report(generation, report),
+            )
+        except ValueError as exc:
+            self.planner_enabled_var.set(False)
+            self.planner_status_var.set("Planner: disabled.")
+            messagebox.showerror("Enable LLM planner", str(exc))
+            return
+
+        self.planner_status_var.set(
+            f"Planner: enabled ({config.ollama.model}, every {config.interval_seconds:g}s)."
+        )
+        self.log(
+            "LLM planner ENABLED. It can only enable or disable existing rules; "
+            "input control still gates every dispatch."
+        )
+
+    def _reset_planner_last_cycle(self):
+        """Invalidate pending cycle reports and clear the last-cycle label (Tk thread)."""
+        self._planner_generation += 1
+        self.planner_last_cycle_var.set(PLANNER_NO_CYCLE_TEXT)
+
+    def _schedule_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
+        """Called on the planner thread; marshal the report onto Tk's event loop."""
+        if self._closing:
+            return
+        try:
+            self.root.after(0, self._show_planner_cycle_report, generation, report)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _show_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
+        if self._closing or generation != self._planner_generation:
+            return
+
+        message = " ".join(report.message.split())
+        if len(message) > PLANNER_MESSAGE_MAX_CHARS:
+            message = message[: PLANNER_MESSAGE_MAX_CHARS - 1] + "…"
+        finished = datetime.fromtimestamp(report.finished_at).strftime("%H:%M:%S")
+        if report.duration_seconds < 1.0:
+            duration = f"{report.duration_seconds * 1000:.0f}ms"
+        else:
+            duration = f"{report.duration_seconds:.1f}s"
+        self.planner_last_cycle_var.set(
+            f"Last cycle: {finished} · {duration} · {report.status} · {message}"
+        )
 
     def save_snapshot(self):
         frame = self.latest_raw_frame
@@ -782,10 +946,12 @@ class PersonalGameAIApp:
             if getattr(self, "hotkey_listener", None):
                 self.hotkey_listener.stop()
         finally:
+            self._planner_logger.removeHandler(self._planner_log_handler)
             self.root.destroy()
 
 
 if __name__ == "__main__":
+    logging.basicConfig(level=logging.INFO)
     root = tk.Tk()
     app = PersonalGameAIApp(root)
     root.mainloop()

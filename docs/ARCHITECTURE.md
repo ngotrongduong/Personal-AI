@@ -1,6 +1,6 @@
 # Architecture
 
-## Current v0.3 runtime loop
+## Fast runtime loop (v0.3, unchanged in v0.4)
 
 ```text
 DXcam frame
@@ -97,11 +97,42 @@ Merged and machine-smoke-tested on Windows:
 HP/resource-bar measurement is implemented as pure vision/state logic and can be
 wired into game profiles as needed.
 
-Basic OCR is the remaining v0.3 integration item while draft PR #11 is under
-real-Tesseract Windows smoke testing.
+Basic OCR (`vision/ocr.py`, `agent/ocr_state_bridge.py`) is merged and was
+smoke-tested against real Tesseract on Windows (PR #11).
+
+## v0.4 local AI planner (optional, default off)
+
+```text
+GameState snapshot + current rule on/off settings
+   ↓  (every few seconds, background daemon thread)
+OllamaClient → local model (default qwen3.5:9b)
+   ↓
+parse_directive  — closed vocabulary: enable_rule / disable_rule / noop
+   ↓
+RuleEngine.enable_rule / disable_rule   (never ActionIntent, never input)
+```
+
+- `agent/ollama_client.py` — stdlib REST client for `127.0.0.1:11434`, bounded
+  timeouts, sends `"think": false` so thinking models return JSON.
+- `agent/llm_planner_schema.py` — the only authority on what model output means;
+  anything outside the closed vocabulary is rejected and logged.
+- `agent/llm_planner.py` — `LlmPlanner.plan_once` fails closed: any Ollama error,
+  empty response, or validation rejection leaves rule settings unchanged.
+- `agent/planner_scheduler.py` — `PlannerScheduler` runs cycles on its own daemon
+  thread, isolated from the Tk thread and the fast loop; logs each outcome and
+  offers an observation-only `on_cycle` report for the UI.
+- `agent/planner_controller.py` — `PlannerController` owns the scheduler
+  lifecycle for `main.py`. `stop()` never blocks the Tk thread, and a directive
+  that arrives after stop is discarded (`PlannerCancelledError`).
+- `agent/planner_config.py` — `PlannerConfig`, disabled unless explicitly enabled.
+
+`RuleEngine` is guarded by an `RLock` because the planner thread toggles rules
+while the fast loop evaluates them. F8 and window close release input *before*
+stopping the planner. The planner has no path to `ActionIntent`,
+`ActionDispatcher`, or `InputController`; the dispatcher's gates are unchanged.
 
 ## Why the LLM is not in the fast loop
 
-A future local LLM belongs above the deterministic rule layer. It can choose
-goals or strategies every few seconds, but frame-by-frame gameplay should remain
-deterministic for latency, predictability, debuggability, and safety.
+The local LLM sits above the deterministic rule layer. It can choose goals or
+strategies every few seconds, but frame-by-frame gameplay stays deterministic
+for latency, predictability, debuggability, and safety.

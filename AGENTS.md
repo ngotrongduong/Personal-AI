@@ -49,7 +49,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- `feature/v0.3-game-state` is the current v0.3 integration branch; v0.3 work branches from it, not from `main`.
+- `feature/v0.4-llm-planner` is the current v0.4 integration branch; v0.4 work branches from it, not from `main`.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -60,7 +60,7 @@ This repo is developed by more than one AI assistant at once (Claude Code, Codex
 - Codex/ChatGPT uses branch names `codex/<task>`.
 - Nobody pushes directly to `main` or to an active integration branch (e.g. `feature/v0.3-game-state`); every change lands through a PR.
 - Before starting a task: `git fetch` and check existing branches/open PRs to confirm the task is not already in progress on another branch.
-- PRs for v0.3 sub-tasks target `feature/v0.3-game-state`, not `main`. That branch merges into `main` only once v0.3 is complete and stable.
+- PRs for v0.4 sub-tasks target `feature/v0.4-llm-planner`, not `main`. That branch merges into `main` only once v0.4 is complete and stable.
 
 **Default task assignment:** Claude Code's context/token budget for this repo is
 more limited per session than Codex/ChatGPT's, so route work accordingly rather
@@ -79,11 +79,11 @@ than defaulting everything to whichever assistant is already in the conversation
 ```
 main
   ^
-  | PR (v0.3 complete)
-feature/v0.3-game-state
+  | PR (v0.4 complete)
+feature/v0.4-llm-planner
   ^
-  |-- claude/<task>   (PR back into feature/v0.3-game-state)
-  |-- codex/<task>    (PR back into feature/v0.3-game-state)
+  |-- claude/<task>   (PR back into feature/v0.4-llm-planner)
+  |-- codex/<task>    (PR back into feature/v0.4-llm-planner)
   `-- codex/<task-2>
 ```
 
@@ -91,6 +91,11 @@ feature/v0.3-game-state
 - Keep commits scoped and descriptive.
 - Before merge: run syntax checks, lint, and the test suite (see `scripts/test.ps1` / CI).
 
-## v0.3 priority
+## v0.4 priority
 
-Follow GitHub Issue #1: multiple named detectors, game-state variables, safe rules, cooldown/debounce, action logs, ROI support, HP/resource measurement, then basic OCR.
+Follow GitHub Issue #15: Ollama HTTP client, planner directive schema/validator,
+`agent/llm_planner.py`, cadence/timer isolated from the fast loop,
+fallback/timeout handling, config surface, decision logging, fake-client tests,
+then Claude's real-Ollama Windows install + live integration smoke test. The
+planner must never bypass any v0.3 safety gate — see `docs/PLAN.md`'s design
+constraint section before implementing anything here.

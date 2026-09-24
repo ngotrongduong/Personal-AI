@@ -30,19 +30,24 @@
 - Gated action dispatcher (`ActionIntent` → `InputController`), F8 emergency
   stop verified live against a real autonomous action.
 
-## Next — v0.4 Local AI planner
+### Stage 4 — Local AI planner (v0.4, Issue #15)
+- Ollama backend (headless REST on localhost), default model `qwen3.5:9b`.
+- Planner proposes directives from a closed vocabulary
+  (`enable_rule` / `disable_rule` / `noop`) applied only via `RuleEngine`;
+  it can never create input or bypass v0.3's dispatcher gates.
+- Runs on its own slow background thread; fails closed on any Ollama error,
+  timeout, or invalid output.
+- Default-off "Planner (Ollama)" UI panel with last-cycle time/latency/status;
+  F8 stops input first, then the planner.
+- Live-smoke-tested on Windows with the real model.
 
-- LM Studio or Ollama backend.
-- Local LLM used only for high-level strategy/planning.
-- Fast game reactions remain deterministic/state-machine based (v0.3's rule
-  engine + action dispatcher).
+## Next — v0.5 Demonstration recording
 
-## Later
-
-### v0.5 — Demonstration recording
 - Record screen state plus the user's actions.
 - Build datasets for repeatable tasks.
 - Optional imitation-learning experiments.
+
+## Later
 
 ### v1.0 — Personal Game Agent
 - Vision -> state -> plan -> action -> observation loop.

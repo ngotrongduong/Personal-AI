@@ -15,16 +15,175 @@ file and `docs/PLAN.md` in the same push as the work.
    GitHub account billing/spending-limit state.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-23)
+## Right now (2026-09-24)
 
 v0.3 ("Game State + Rules", Issue #1) is **done and merged into `main`**
-(PR #2, merge commit `ef3ad40`). Issue #1 is closed. All 10 planned items and
-all 5 acceptance criteria are satisfied — see `docs/PLAN.md` for the per-task
-breakdown. 64/64 tests pass, ruff clean, on `main`.
+(PR #2, merge commit `ef3ad40`). Issue #1 is closed. 64/64 tests pass, ruff
+clean, on `main`.
 
-Next milestone per `docs/ROADMAP.md`: **v0.4 — Local AI planner** (LM Studio/Ollama
-backend for high-level strategy; fast reactions stay deterministic/state-machine
-based). No branch/issue opened for it yet.
+**v0.4 ("Local AI Planner", Issue #15) is now scoped and in progress** on
+`feature/v0.4-llm-planner`. Backend decision: **Ollama** (user confirmed,
+2026-09-23) — headless REST API, no GUI dependency, fits local scripted
+verification. See `docs/PLAN.md` for the full checklist/design constraint
+(the planner proposes directives from a closed vocabulary; it can never
+synthesize raw input or bypass any v0.3 safety gate).
+
+Tasks 1-3 are **done and merged** into `feature/v0.4-llm-planner`:
+`agent/ollama_client.py` (stdlib Ollama REST client, PR #17),
+`agent/llm_planner_schema.py` (closed-vocabulary directive parser —
+`enable_rule`/`disable_rule`/`noop`; `set_priority` was deferred, PR #17),
+and `agent/llm_planner.py` (`LlmPlanner.plan_once`: prompt from `GameState`
+→ Ollama → `parse_directive` → `RuleEngine.enable_rule`/`disable_rule` only,
+fails closed on any error, PR #20). Along the way, task 3 surfaced that
+`RuleEngine` had no enable/disable-rule API at all — that gap was fixed
+first (`RuleEngine.enable_rule`/`disable_rule`/`is_rule_enabled`, PR #19)
+before task 3 could be built. Both PR #19 and PR #20 got an explicit
+`safety-reviewer` PASS before merging, since they touch the core
+LLM-to-rule-engine safety boundary.
+
+A first attempt at task 4 then surfaced a second prerequisite gap:
+`RuleEngine` had no thread synchronization at all, which is a real data
+race once a background planner thread starts calling `enable_rule`/
+`disable_rule` concurrently with the main thread's per-frame `evaluate()`.
+Fixed with a `threading.RLock` matching `GameState`'s existing pattern
+(task 3b, PR #22, safety-reviewed PASS, new concurrency test).
+
+**Task 4 is now done and merged**: `agent/planner_scheduler.py`
+(`PlannerScheduler`, PR #24) runs `LlmPlanner.plan_once` on its own daemon
+background thread at a configurable interval (default 5s), fully isolated
+from the Tk UI thread and the fast loop. Idempotent `start()`/`stop()`,
+prompt interruptible shutdown, per-cycle exception isolation (one bad
+Ollama/network error can't kill the thread). Not yet wired into
+`main.py`'s lifecycle — that's a separate future task. Safety-reviewed
+PASS. 94/94 tests pass on `feature/v0.4-llm-planner`.
+
+**Task 5 is now done and merged**: as expected, `LlmPlanner.plan_once` and
+`PlannerScheduler` already failed closed on every Ollama/validation error
+path, so this task was verification + documentation rather than new logic.
+Added explicit test coverage in `tests/test_llm_planner.py` (full rule-state
+snapshot comparison across CONNECTION/TIMEOUT/HTTP_STATUS/RESPONSE_FORMAT
+Ollama errors, missing response text, and directive-validation rejection)
+and a docstring note on `plan_once` recording the fail-closed contract for
+future reviewers. Safety-reviewed PASS (docstring + tests only, no logic
+change). Merged via PR #26. 95/95 tests pass.
+
+**Task 6 is now done and merged**: `agent/planner_config.py` (`PlannerConfig`
++ `load_planner_config`, PR #31) adds the config surface — model name,
+Ollama host/port, poll interval, all reusing `OllamaClientConfig`'s own
+validation — plus an explicit `enabled` toggle that defaults to off at
+two independent layers (the loader's defaults, and the dataclass's own
+`__post_init__`), so it can't be silently turned on. Example block added
+to `configs/example_game_v0.3.json`. Not wired into `main.py`'s runtime
+yet (deliberately out of scope, same as `PlannerScheduler`). Safety-
+reviewed PASS. 114/114 tests pass.
+
+**Task 7 is now done and merged**: `PlannerScheduler._run` was discarding
+`LlmPlanner.plan_once`'s `PlannerOutcome` return value entirely, so
+nothing observed planner decisions unless a cycle raised an exception.
+Fixed by logging the outcome (accepted directive / rejected+reason /
+Ollama error, already encoded in `PlannerOutcome.message`) at INFO after
+each successful cycle, mirroring `main.py`'s existing DISPATCHED/BLOCKED
+logging for `ActionDispatcher`. No change to `LlmPlanner`, `RuleEngine`,
+`OllamaClient`, `ActionDispatcher`, or `main.py`. Safety-reviewed PASS
+(no findings). PR #33. 115/115 tests pass.
+
+**Task 8 is now done and merged**: existing tests already used injected
+fake Ollama transports throughout, so this filled the remaining untested
+branches — Ollama response-format edge cases (missing/non-string
+`response`, non-UTF-8 body), `URLError`-wrapped timeouts, schema
+rejection of malformed/prose-wrapped/action-smuggling/case-variant
+directives — plus the first composed end-to-end test
+(`tests/test_planner_integration.py`: real `OllamaClient` with fake
+transport → `LlmPlanner` → `RuleEngine`, driven by `PlannerScheduler`'s
+background thread). Tests only, no production change, no bugs found.
+Safety-reviewed PASS. PR #35. 128/128 tests pass.
+
+**v0.4 task 9 done (2026-09-23): real Ollama + live smoke test.** Ollama
+0.34.3 is installed on the Windows dev machine (`%LOCALAPPDATA%\Programs\Ollama`,
+server on 127.0.0.1:11434) with model `qwen3.5:9b` (~6.6 GB) pulled.
+
+Wiring (Codex): `agent/planner_controller.py`'s `PlannerController` owns the
+optional scheduler lifecycle (`OllamaClient` → `LlmPlanner` →
+`PlannerScheduler`, no input/dispatch role). `main.py` gained a default-off
+"Planner (Ollama)" panel (enable checkbox, model default `qwen3.5:9b`, interval
+≥ 1.0s, status label); planner INFO logs are forwarded to the Tk log. F8,
+Clear Rules, and window close stop the planner, and F8/close release input
+*before* stopping it. `stop()` is non-blocking (`join_timeout=0.0`), and a
+per-start `_CancellableRuleControl` proxy makes any in-flight directive after
+stop raise `PlannerCancelledError` (logged once as "discarded after stop; rule
+settings unchanged", no misleading `changed=True` outcome).
+
+Live findings fixed: `qwen3.5` is a thinking model — with `format:"json"` and
+no `think` flag Ollama returned an empty `response` or HTTP 500, so
+`OllamaClient` now sends `"think": false`. The model also invented keys
+(`{"action": "noop"}`) until the prompt listed the three exact JSON shapes.
+`parse_directive` remains the only authority.
+
+Live results: headless planner 4/4 correct noops (~2.3s/call); scheduler with
+the real model correctly enabled a disabled rule whose detector was visible;
+`stop()` returned in <1ms and in-flight directives were discarded; unreachable
+Ollama kept rules unchanged. GUI smoke on a harmless Notepad window: template
+detector FOUND, rule dispatches stayed BLOCKED with input disabled, enabling
+the planner did not enable input, planner cycles logged `noop`, F8 unticked
+input *and* stopped the planner ("disabled by emergency stop"), and no cycles
+ran afterwards. Real click dispatch was not exercised in this run (v0.3 gates
+unchanged). Safety-reviewed twice (PASS; all Important/Minor findings fixed).
+137/137 tests.
+
+Follow-ups (not blocking): planner rule changes are logged without a reason
+(could add an optional `reason` field to the directive schema); a quick
+disable/re-enable can leave a cancelled worker waiting on HTTP (up to the 30s
+timeout) alongside the new one — harmless, just wasted Ollama work; there are no
+Tk-level tests for the planner panel.
+
+**v0.4 task 10 done (2026-09-24): planner visibility in the UI.** Codex hit
+its usage limit, so Claude implemented it directly. `PlannerScheduler` has an
+optional observation-only `on_cycle(PlannerCycleReport)` callback;
+`PlannerController.start` passes it through; the planner panel shows
+"Last cycle: HH:MM:SS · latency · status · message". Stale reports from a
+stopped scheduler are dropped via a Tk-thread-only generation counter. Live
+smoke on the real model: 11.0s cold / 2.5s warm `noop` cycles displayed; F8
+reset the label and stopped the planner. Safety-reviewed PASS (3 Minor
+fixed). 146/146 tests. PR #38.
+
+All numbered v0.4 tasks (1-10) are now done. **Release close-out (2026-09-24):**
+`main` (PR #28) was merged into the v0.4 line on `claude/v0.4-release-prep`,
+resolving the `APP_VERSION` conflict to `"0.4.0"`; `CHANGELOG.md` gained
+v0.3.0 and v0.4.0 entries, `docs/ROADMAP.md` moved v0.4 to Completed (next:
+v0.5 demonstration recording), `docs/ARCHITECTURE.md` documents the planner
+layer, and `README.md` has a v0.4 overview. After that PR lands on
+`feature/v0.4-llm-planner`, the feature branch is PR'd into `main` and Issue
+#15 is closed.
+
+**Previously-unreviewed branches: both resolved (2026-09-23).** The two
+external Codex branches noted above turned out to originate from the user
+separately asking ChatGPT to research useful local AI models on GitHub.
+Both were reviewed (dry-run 3-way merge test + full test suite +
+`safety-reviewer` PASS) and merged:
+
+- `codex/v0.4-model-foundation` → merged into `feature/v0.4-llm-planner`
+  via PR #29. Adds the `model_runtime` package (see "Foundational
+  infrastructure" in `docs/PLAN.md`). Purely additive, doesn't touch the
+  planner/dispatcher safety boundary, never auto-downloads models.
+- `codex/v0.3-release-metadata` → its raw diff against `main` looked like
+  a regression at first glance (it appeared to delete `vision/ocr.py`
+  etc.) because the branch was based on a pre-OCR commit — those were
+  divergence artifacts, not real changes. A real 3-way merge test showed
+  it only fixes two things: `main.py`'s `APP_VERSION` was still `"0.2.0"`
+  despite v0.3 being fully merged, and `docs/ARCHITECTURE.md` still
+  described the dispatcher as future work. Merged into `main` via PR #28
+  (squash), 64/64 tests pass, no files deleted.
+
+Both throwaway local test branches and the merged remote branches have
+been deleted. `main` is now at `APP_VERSION = "0.3.0"` with an accurate
+architecture doc; `feature/v0.4-llm-planner` has 107/107 tests passing
+(94 planner tests + 13 new `model_runtime` tests).
+
+**Operational note:** Codex's CLI sandbox intermittently denies git writes
+(can't reliably run `git checkout -b`/`git commit` itself, even though it
+can edit/create files fine). Workaround: tell it explicitly to run no git
+commands at all and just edit files in the working tree; Claude branches/
+commits/pushes afterward. Apply this to future Codex delegations here.
 
 Claude handles work that genuinely needs the user's Windows machine. Codex/ChatGPT
 defaults to pure logic, algorithms, tests, docs, and config.
@@ -64,10 +223,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Start scoping v0.4 (local AI planner) per `docs/ROADMAP.md`: decide LM Studio vs.
-Ollama, define the boundary between the deterministic rule engine (fast reactions,
-already built in v0.3) and the local-LLM planner (high-level strategy only), and
-open a tracking issue before assigning implementation work.
+Finish the v0.4 release: merge the `feature/v0.4-llm-planner` → `main` PR,
+close Issue #15, and delete the merged feature branch. Then scope v0.5
+(demonstration recording) as a new issue + `docs/PLAN.md`. Ollama +
+`qwen3.5:9b` are installed locally. Open v0.4 follow-ups (not blocking):
+optional directive `reason` field; a cancelled worker can linger on HTTP after
+a fast disable/re-enable.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
@@ -86,7 +247,10 @@ Record that local verification explicitly in each PR.
 
 ### Open issue
 
-None open right now. Issue #1 (v0.3) and Issue #4 are both completed/closed.
+- **#15** — v0.4 Local AI Planner. `docs/PLAN.md` mirrors its checklist with
+  status/owner columns.
+
+Issue #1 (v0.3) and Issue #4 are both completed/closed.
 
 ## Lessons
 

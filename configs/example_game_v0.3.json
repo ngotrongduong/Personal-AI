@@ -5,6 +5,13 @@
   "emergency_stop": "F8",
   "input_enabled_by_default": false,
   "autonomous_actions": false,
+  "planner": {
+    "enabled": false,
+    "model": "qwen3.5:9b",
+    "host": "127.0.0.1",
+    "port": 11434,
+    "interval_seconds": 5.0
+  },
   "detectors": [
     {
       "name": "collect_button",
