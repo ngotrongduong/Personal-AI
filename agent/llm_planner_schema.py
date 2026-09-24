@@ -26,15 +26,41 @@ class NoopDirective:
     """Explicitly request no rule-configuration change this planner cycle."""
 
 
-PlannerDirective: TypeAlias = EnableRuleDirective | DisableRuleDirective | NoopDirective
+@dataclass(frozen=True, slots=True)
+class RunSkillDirective:
+    """Propose running one enabled profile skill, by name only (v0.7).
+
+    There is deliberately no field for a key, coordinate, duration or
+    detector: those always come from the profile's skill definition.
+    ``reason`` is display and prompt text only.
+    """
+
+    skill_name: str
+    reason: str
+
+
+PlannerDirective: TypeAlias = (
+    EnableRuleDirective | DisableRuleDirective | NoopDirective | RunSkillDirective
+)
+
+MAX_REASON_LENGTH = 200
 
 
 class DirectiveValidationError(ValueError):
     """The raw planner response was not in the reviewed directive vocabulary."""
 
 
-def parse_directive(raw: str, known_rule_names: Collection[str]) -> PlannerDirective:
-    """Parse one JSON directive and reject every shape outside the closed schema."""
+def parse_directive(
+    raw: str,
+    known_rule_names: Collection[str],
+    runnable_skill_names: Collection[str] = (),
+) -> PlannerDirective:
+    """Parse one JSON directive and reject every shape outside the closed schema.
+
+    ``run_skill`` is accepted only for a name in ``runnable_skill_names`` (the
+    loaded profile's currently enabled skills); with the default empty
+    collection every ``run_skill`` is rejected.
+    """
 
     if not isinstance(raw, str):
         raise DirectiveValidationError("Planner directive must be a JSON string.")
@@ -55,6 +81,12 @@ def parse_directive(raw: str, known_rule_names: Collection[str]) -> PlannerDirec
         return EnableRuleDirective(_validated_rule_name(value, known_rule_names))
     if directive_type == "disable_rule":
         return DisableRuleDirective(_validated_rule_name(value, known_rule_names))
+    if directive_type == "run_skill":
+        _require_exact_fields(value, {"type", "skill", "reason"})
+        return RunSkillDirective(
+            _validated_skill_name(value["skill"], runnable_skill_names),
+            _validated_reason(value["reason"]),
+        )
 
     if not isinstance(directive_type, str):
         raise DirectiveValidationError("Planner directive 'type' must be a string.")
@@ -69,6 +101,29 @@ def _validated_rule_name(value: dict[object, object], known_rule_names: Collecti
     if rule_name not in known_rule_names:
         raise DirectiveValidationError(f"Planner directive references unknown rule: {rule_name!r}.")
     return rule_name
+
+
+def _validated_skill_name(skill: object, runnable_skill_names: Collection[str]) -> str:
+    if not isinstance(skill, str) or not skill:
+        raise DirectiveValidationError("Planner directive 'skill' must be a non-empty string.")
+    if skill not in runnable_skill_names:
+        raise DirectiveValidationError(
+            f"Planner directive references a skill that is unknown or disabled: {skill!r}."
+        )
+    return skill
+
+
+def _validated_reason(reason: object) -> str:
+    if not isinstance(reason, str):
+        raise DirectiveValidationError("Planner directive 'reason' must be a string.")
+    cleaned = "".join(ch if ch.isprintable() else " " for ch in reason).strip()
+    if not cleaned:
+        raise DirectiveValidationError("Planner directive 'reason' cannot be empty.")
+    if len(cleaned) > MAX_REASON_LENGTH:
+        raise DirectiveValidationError(
+            f"Planner directive 'reason' is longer than {MAX_REASON_LENGTH} characters."
+        )
+    return cleaned
 
 
 def _require_exact_fields(value: dict[object, object], expected: set[str]) -> None:

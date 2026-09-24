@@ -1,8 +1,17 @@
-"""Safe, synchronous bridge from validated Ollama directives to rule settings."""
+"""Safe, synchronous bridge from validated Ollama directives to rule settings
+and (from v0.7) skill proposals.
+
+The planner never produces input. Rule toggles apply directly (they send no
+input); a ``run_skill`` directive only becomes a proposal posted to a sink,
+which the Tk thread approves, rejects or runs through the skill executor.
+"""
 
 from __future__ import annotations
 
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import time
+from typing import Protocol
 
 from .game_state import GameState, Observation
 from .llm_planner_schema import (
@@ -10,10 +19,16 @@ from .llm_planner_schema import (
     DisableRuleDirective,
     EnableRuleDirective,
     NoopDirective,
+    RunSkillDirective,
     parse_directive,
 )
 from .ollama_client import OllamaClient
 from .rule_engine import RuleEngine
+from .skills import ClickSkill, HoldSkill, PressSkill, SkillBook
+from .step_history import StepHistory
+
+
+MAX_GOAL_LENGTH = 500
 
 
 @dataclass(frozen=True, slots=True)
@@ -28,23 +43,81 @@ class PlannerCancelledError(RuntimeError):
     """Raised when shutdown discards an in-flight planner directive."""
 
 
+@dataclass(frozen=True, slots=True)
+class SkillSummary:
+    """What the prompt shows about one runnable skill."""
+
+    name: str
+    type: str
+    detail: str
+
+
+class SkillCatalog(Protocol):
+    """Read-only view of the skills the planner may propose right now."""
+
+    def runnable_skills(self) -> Sequence[SkillSummary]: ...
+
+
+class ProposalSink(Protocol):
+    """Where a validated ``run_skill`` goes. Returns False if a step is pending."""
+
+    def propose(self, skill_name: str, reason: str) -> bool: ...
+
+
+class SkillBookCatalog:
+    """Expose a profile's currently *enabled* skills to the planner."""
+
+    def __init__(self, book: SkillBook) -> None:
+        self._book = book
+
+    def runnable_skills(self) -> list[SkillSummary]:
+        summaries: list[SkillSummary] = []
+        for name in self._book.names:
+            if not self._book.is_enabled(name):
+                continue
+            skill = self._book.get(name)
+            if isinstance(skill, ClickSkill):
+                summaries.append(SkillSummary(name, skill.TYPE, f"clicks detector {skill.detector}"))
+            elif isinstance(skill, PressSkill):
+                summaries.append(SkillSummary(name, skill.TYPE, f"presses key {skill.key}"))
+            elif isinstance(skill, HoldSkill):
+                summaries.append(
+                    SkillSummary(name, skill.TYPE, f"holds key {skill.key} for {skill.seconds:g}s")
+                )
+        return summaries
+
+
 class LlmPlanner:
     """Ask Ollama for one reviewed directive without directly producing input."""
 
-    def __init__(self, ollama_client: OllamaClient, rule_engine: RuleEngine) -> None:
+    def __init__(
+        self,
+        ollama_client: OllamaClient,
+        rule_engine: RuleEngine,
+        *,
+        skills: SkillCatalog | None = None,
+        history: StepHistory | None = None,
+        goal: str | Callable[[], str] = "",
+        proposals: ProposalSink | None = None,
+    ) -> None:
         self._ollama_client = ollama_client
         self._rule_engine = rule_engine
+        self._skills = skills
+        self._history = history
+        self._goal = goal
+        self._proposals = proposals
 
     def plan_once(self, state: GameState) -> PlannerOutcome:
-        """Apply one schema-valid directive, failing closed on every error path.
+        """Apply or propose one schema-valid directive, failing closed on every error path.
 
         Every supported failure path here--client failures, missing response
         text, and directive-validation failures--fails closed by retaining the
-        exact current rule configuration; this contract is covered by
-        ``tests/test_llm_planner.py``.
+        exact current rule configuration and proposing nothing; this contract
+        is covered by ``tests/test_llm_planner.py``.
         """
 
-        result = self._ollama_client.generate(self._build_prompt(state))
+        runnable = self._runnable_skills()
+        result = self._ollama_client.generate(self._build_prompt(state, runnable))
         if not result.successful:
             return PlannerOutcome(f"no change, Ollama error: {result.error}")
 
@@ -53,8 +126,9 @@ class LlmPlanner:
             return PlannerOutcome("no change, rejected: Ollama returned no directive text.")
 
         known_rule_names = {rule.name for rule in self._rule_engine.rules}
+        runnable_names = {skill.name for skill in runnable}
         try:
-            directive = parse_directive(response_text, known_rule_names)
+            directive = parse_directive(response_text, known_rule_names, runnable_names)
         except DirectiveValidationError as error:
             return PlannerOutcome(f"no change, rejected: {error}")
 
@@ -66,10 +140,30 @@ class LlmPlanner:
             return PlannerOutcome(f"disabled {directive.rule_name}", changed=True)
         if isinstance(directive, NoopDirective):
             return PlannerOutcome("noop")
+        if isinstance(directive, RunSkillDirective):
+            # `runnable` is empty without a sink, so parsing already rejected it.
+            assert self._proposals is not None
+            if self._proposals.propose(directive.skill_name, directive.reason):
+                return PlannerOutcome(f"proposed {directive.skill_name}: {directive.reason}")
+            return PlannerOutcome(
+                f"dropped proposal {directive.skill_name}: a step is already pending"
+            )
 
         raise AssertionError(f"Unhandled validated planner directive: {directive!r}")
 
-    def _build_prompt(self, state: GameState) -> str:
+    def _runnable_skills(self) -> list[SkillSummary]:
+        if self._skills is None or self._proposals is None:
+            return []
+        return list(self._skills.runnable_skills())
+
+    def _goal_text(self) -> str:
+        goal = self._goal() if callable(self._goal) else self._goal
+        if not isinstance(goal, str):
+            return ""
+        cleaned = "".join(ch if ch.isprintable() else " " for ch in goal).strip()
+        return cleaned[:MAX_GOAL_LENGTH]
+
+    def _build_prompt(self, state: GameState, runnable: Sequence[SkillSummary]) -> str:
         observations = state.snapshot()
         observation_lines = _format_observations(observations)
         rule_lines = [
@@ -77,20 +171,36 @@ class LlmPlanner:
             for rule in self._rule_engine.rules
         ]
 
-        return "\n".join(
-            [
-                "Choose one safe rule-configuration directive for this game state.",
-                "Game state observations:",
-                *observation_lines,
-                "Current rules:",
-                *rule_lines,
-                "Respond with exactly one JSON object and nothing else, using one of these shapes:",
-                '{"type": "enable_rule", "rule_name": "<one of the current rule names>"}',
-                '{"type": "disable_rule", "rule_name": "<one of the current rule names>"}',
-                '{"type": "noop"}',
-                "Use only these keys. Do not add other keys.",
+        lines = [
+            "Choose one safe directive for this game state.",
+            f"Goal: {self._goal_text() or '(no goal set)'}",
+            "Game state observations:",
+            *observation_lines,
+            "Current rules:",
+            *(rule_lines or ["- none"]),
+        ]
+        if runnable:
+            lines += [
+                "Skills you may propose (the user or auto mode decides whether it runs):",
+                *(f"- {skill.name} ({skill.type}): {skill.detail}" for skill in runnable),
             ]
-        )
+        if self._history is not None:
+            lines += ["Recent steps (oldest first):", *self._history.prompt_lines(time.monotonic())]
+        lines += [
+            "Respond with exactly one JSON object and nothing else, using one of these shapes:",
+            '{"type": "enable_rule", "rule_name": "<one of the current rule names>"}',
+            '{"type": "disable_rule", "rule_name": "<one of the current rule names>"}',
+        ]
+        if runnable:
+            lines.append(
+                '{"type": "run_skill", "skill": "<one of the skill names above>", '
+                '"reason": "<short reason>"}'
+            )
+        lines += [
+            '{"type": "noop"}',
+            "Use only these keys. Do not add other keys.",
+        ]
+        return "\n".join(lines)
 
 
 def _format_observations(observations: dict[str, Observation]) -> list[str]:
