@@ -15,7 +15,7 @@ file and `docs/PLAN.md` in the same push as the work.
    GitHub account billing/spending-limit state.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-23)
+## Right now (2026-09-24)
 
 v0.3 ("Game State + Rules", Issue #1) is **done and merged into `main`**
 (PR #2, merge commit `ef3ad40`). Issue #1 is closed. 64/64 tests pass, ruff
@@ -136,8 +136,21 @@ disable/re-enable can leave a cancelled worker waiting on HTTP (up to the 30s
 timeout) alongside the new one — harmless, just wasted Ollama work; there are no
 Tk-level tests for the planner panel.
 
-Next up: task 10 (optional planner visibility — last directive/latency in the
-UI; the minimal enable/status panel already exists from task 9).
+**v0.4 task 10 done (2026-09-24): planner visibility in the UI.** Codex hit
+its usage limit, so Claude implemented it directly. `PlannerScheduler` has an
+optional observation-only `on_cycle(PlannerCycleReport)` callback;
+`PlannerController.start` passes it through; the planner panel shows
+"Last cycle: HH:MM:SS · latency · status · message". Stale reports from a
+stopped scheduler are dropped via a Tk-thread-only generation counter. Live
+smoke on the real model: 11.0s cold / 2.5s warm `noop` cycles displayed; F8
+reset the label and stopped the planner. Safety-reviewed PASS (3 Minor
+fixed). 146/146 tests.
+
+All numbered v0.4 tasks (1-10) are now done. Remaining before closing Issue
+#15: merge `main` into `feature/v0.4-llm-planner` (it still has
+`APP_VERSION = "0.2.0"`; `main` has the `0.3.0` fix from PR #28), bump to
+`0.4.0`, update `CHANGELOG.md`/`docs/ROADMAP.md`, then PR the feature branch
+into `main`.
 
 **Previously-unreviewed branches: both resolved (2026-09-23).** The two
 external Codex branches noted above turned out to originate from the user
@@ -207,9 +220,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.4 task 10 (optional planner visibility in the UI). Tasks 1-9 are done;
-Ollama + `qwen3.5:9b` are installed locally. PRs target
-`feature/v0.4-llm-planner`, not `main`.
+Close out v0.4: sync `main` into `feature/v0.4-llm-planner`, bump
+`APP_VERSION` to `0.4.0`, update `CHANGELOG.md`/`docs/ROADMAP.md`, then open the
+feature → `main` PR and close Issue #15. Tasks 1-10 are done; Ollama +
+`qwen3.5:9b` are installed locally.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 

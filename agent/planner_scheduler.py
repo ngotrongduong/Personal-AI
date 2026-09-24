@@ -2,15 +2,36 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
+from dataclasses import dataclass
 import logging
 import threading
-from typing import Protocol
+import time
+from typing import Literal, Protocol
 
 from .game_state import GameState
 from .llm_planner import PlannerCancelledError
 
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass(frozen=True, slots=True)
+class PlannerCycleReport:
+    """Observation-only summary of one finished planner cycle.
+
+    ``finished_at`` is wall-clock time (``time.time()``) for display;
+    ``duration_seconds`` is measured with ``time.monotonic()``.
+    """
+
+    status: Literal["ok", "cancelled", "error"]
+    message: str
+    changed: bool | None
+    duration_seconds: float
+    finished_at: float
+
+
+CycleCallback = Callable[[PlannerCycleReport], None]
 
 
 class Planner(Protocol):
@@ -35,6 +56,7 @@ class PlannerScheduler:
         state: GameState,
         *,
         interval_seconds: float = 5.0,
+        on_cycle: CycleCallback | None = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive.")
@@ -42,6 +64,7 @@ class PlannerScheduler:
         self._planner = planner
         self._state = state
         self._interval_seconds = interval_seconds
+        self._on_cycle = on_cycle
         self._lifecycle_lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -106,13 +129,19 @@ class PlannerScheduler:
     def _run(self, stop_event: threading.Event) -> None:
         try:
             while not stop_event.is_set():
+                started_at = time.monotonic()
                 try:
                     outcome = self._planner.plan_once(self._state)
                     logger.info("Planner cycle outcome: %s", outcome)
+                    report_args = ("ok", outcome)
                 except PlannerCancelledError:
                     logger.info("Planner directive discarded after stop; rule settings unchanged.")
-                except Exception:
+                    report_args = ("cancelled", None)
+                except Exception as exc:
                     logger.exception("Planner scheduler cycle failed; retaining current rule settings.")
+                    report_args = ("error", exc)
+
+                self._report_cycle(*report_args, time.monotonic() - started_at)
 
                 if stop_event.wait(self._interval_seconds):
                     break
@@ -120,3 +149,33 @@ class PlannerScheduler:
             with self._lifecycle_lock:
                 if self._thread is threading.current_thread():
                     self._thread = None
+
+    def _report_cycle(
+        self,
+        status: Literal["ok", "cancelled", "error"],
+        detail: object,
+        duration_seconds: float,
+    ) -> None:
+        if self._on_cycle is None:
+            return
+
+        # Build the report inside the guard too: str() on an arbitrary outcome
+        # or exception must not be able to kill the scheduler thread.
+        try:
+            if status == "ok":
+                message = str(getattr(detail, "message", detail))
+                changed = getattr(detail, "changed", None)
+            elif status == "cancelled":
+                message, changed = "discarded after stop", None
+            else:
+                message, changed = f"cycle failed: {detail}", None
+            report = PlannerCycleReport(
+                status=status,
+                message=message,
+                changed=changed,
+                duration_seconds=duration_seconds,
+                finished_at=time.time(),
+            )
+            self._on_cycle(report)
+        except Exception:
+            logger.exception("Planner cycle callback failed; scheduler continues.")

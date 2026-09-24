@@ -19,6 +19,7 @@ from agent.game_state import GameState
 from agent.ollama_client import OllamaClientConfig
 from agent.planner_config import PlannerConfig
 from agent.planner_controller import PlannerController
+from agent.planner_scheduler import PlannerCycleReport
 from agent.rule_engine import RuleEngine, VisibilityRule
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
@@ -30,6 +31,8 @@ from vision.template_matcher import TemplateMatcher, MatchResult
 
 APP_VERSION = "0.2.0"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
+PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
+PLANNER_MESSAGE_MAX_CHARS = 100
 
 
 class _PlannerLogHandler(logging.Handler):
@@ -125,6 +128,10 @@ class PersonalGameAIApp:
         self.planner_model_var = tk.StringVar(value=PLANNER_DEFAULT_MODEL)
         self.planner_interval_var = tk.StringVar(value="5.0")
         self.planner_status_var = tk.StringVar(value="Planner: disabled.")
+        self.planner_last_cycle_var = tk.StringVar(value=PLANNER_NO_CYCLE_TEXT)
+        # Bumped on every planner start/stop (Tk thread only) so cycle reports
+        # from a stopped or replaced scheduler are never displayed.
+        self._planner_generation = 0
 
         self._build_ui()
         self._planner_logger = logging.getLogger("agent.planner_scheduler")
@@ -302,6 +309,9 @@ class PersonalGameAIApp:
         ).pack(side="left")
         ttk.Label(
             planner_box, textvariable=self.planner_status_var
+        ).pack(anchor="w", padx=8, pady=(0, 2))
+        ttk.Label(
+            planner_box, textvariable=self.planner_last_cycle_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
         info = ttk.Frame(outer)
@@ -481,6 +491,7 @@ class PersonalGameAIApp:
         self.status_var.set("EMERGENCY STOP (F8)")
         planner_was_running = self.planner.is_running
         self.planner.stop()
+        self._reset_planner_last_cycle()
         self.planner_enabled_var.set(False)
         self.planner_status_var.set("Planner: disabled by emergency stop.")
         if planner_was_running:
@@ -574,6 +585,7 @@ class PersonalGameAIApp:
     def clear_rules(self):
         planner_was_running = self.planner.is_running
         self.planner.stop()
+        self._reset_planner_last_cycle()
         self.planner_enabled_var.set(False)
         self.planner_status_var.set("Planner: disabled because rules were cleared.")
         if planner_was_running:
@@ -585,6 +597,7 @@ class PersonalGameAIApp:
     def _toggle_planner(self):
         if not self.planner_enabled_var.get():
             self.planner.stop()
+            self._reset_planner_last_cycle()
             self.planner_status_var.set("Planner: disabled.")
             self.log("LLM planner DISABLED.")
             return
@@ -598,7 +611,13 @@ class PersonalGameAIApp:
                 ollama=OllamaClientConfig(model=self.planner_model_var.get().strip()),
                 interval_seconds=interval_seconds,
             )
-            self.planner.start(self.rule_engine, config)
+            self._reset_planner_last_cycle()
+            generation = self._planner_generation
+            self.planner.start(
+                self.rule_engine,
+                config,
+                on_cycle=lambda report: self._schedule_planner_cycle_report(generation, report),
+            )
         except ValueError as exc:
             self.planner_enabled_var.set(False)
             self.planner_status_var.set("Planner: disabled.")
@@ -611,6 +630,36 @@ class PersonalGameAIApp:
         self.log(
             "LLM planner ENABLED. It can only enable or disable existing rules; "
             "input control still gates every dispatch."
+        )
+
+    def _reset_planner_last_cycle(self):
+        """Invalidate pending cycle reports and clear the last-cycle label (Tk thread)."""
+        self._planner_generation += 1
+        self.planner_last_cycle_var.set(PLANNER_NO_CYCLE_TEXT)
+
+    def _schedule_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
+        """Called on the planner thread; marshal the report onto Tk's event loop."""
+        if self._closing:
+            return
+        try:
+            self.root.after(0, self._show_planner_cycle_report, generation, report)
+        except (tk.TclError, RuntimeError):
+            pass
+
+    def _show_planner_cycle_report(self, generation: int, report: PlannerCycleReport):
+        if self._closing or generation != self._planner_generation:
+            return
+
+        message = " ".join(report.message.split())
+        if len(message) > PLANNER_MESSAGE_MAX_CHARS:
+            message = message[: PLANNER_MESSAGE_MAX_CHARS - 1] + "…"
+        finished = datetime.fromtimestamp(report.finished_at).strftime("%H:%M:%S")
+        if report.duration_seconds < 1.0:
+            duration = f"{report.duration_seconds * 1000:.0f}ms"
+        else:
+            duration = f"{report.duration_seconds:.1f}s"
+        self.planner_last_cycle_var.set(
+            f"Last cycle: {finished} · {duration} · {report.status} · {message}"
         )
 
     def save_snapshot(self):

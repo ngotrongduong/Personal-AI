@@ -16,10 +16,18 @@ class FakeClient:
 
 
 class FakeScheduler:
-    def __init__(self, planner: object, state: GameState, *, interval_seconds: float) -> None:
+    def __init__(
+        self,
+        planner: object,
+        state: GameState,
+        *,
+        interval_seconds: float,
+        on_cycle: object = None,
+    ) -> None:
         self.planner = planner
         self.state = state
         self.interval_seconds = interval_seconds
+        self.on_cycle = on_cycle
         self.started = False
         self.stopped = False
 
@@ -66,10 +74,23 @@ class PlannerControllerTests(unittest.TestCase):
         state: GameState,
         *,
         interval_seconds: float,
+        on_cycle: object = None,
     ) -> FakeScheduler:
-        scheduler = FakeScheduler(planner, state, interval_seconds=interval_seconds)
+        scheduler = FakeScheduler(
+            planner, state, interval_seconds=interval_seconds, on_cycle=on_cycle
+        )
         self.schedulers.append(scheduler)
         return scheduler
+
+    def test_on_cycle_callback_is_passed_to_scheduler(self) -> None:
+        def on_cycle(_report: object) -> None:
+            pass
+
+        self.controller.start(self.engine, self.config, on_cycle=on_cycle)
+        self.assertIs(self.schedulers[0].on_cycle, on_cycle)
+
+        self.controller.start(self.engine, self.config)
+        self.assertIsNone(self.schedulers[1].on_cycle)
 
     def test_disabled_config_does_not_create_scheduler(self) -> None:
         disabled = PlannerConfig()

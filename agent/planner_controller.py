@@ -9,7 +9,7 @@ from .game_state import GameState
 from .llm_planner import LlmPlanner, PlannerCancelledError
 from .ollama_client import OllamaClient
 from .planner_config import PlannerConfig
-from .planner_scheduler import PlannerScheduler
+from .planner_scheduler import CycleCallback, PlannerScheduler
 from .rule_engine import RuleEngine
 
 class _CancellableRuleControl:
@@ -76,8 +76,18 @@ class PlannerController:
 
         return self._scheduler is not None and self._scheduler.is_running
 
-    def start(self, rule_engine: RuleEngine, config: PlannerConfig) -> bool:
-        """Start a configured planner scheduler, replacing any prior scheduler."""
+    def start(
+        self,
+        rule_engine: RuleEngine,
+        config: PlannerConfig,
+        *,
+        on_cycle: CycleCallback | None = None,
+    ) -> bool:
+        """Start a configured planner scheduler, replacing any prior scheduler.
+
+        ``on_cycle`` is an observation-only hook invoked on the scheduler
+        thread after every cycle; it receives no handle to rules or input.
+        """
 
         if not config.enabled or config.ollama is None:
             return False
@@ -90,6 +100,7 @@ class PlannerController:
             planner,
             self._state,
             interval_seconds=config.interval_seconds,
+            on_cycle=on_cycle,
         )
         scheduler.start()
         self._scheduler = scheduler
