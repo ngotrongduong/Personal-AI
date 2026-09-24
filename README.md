@@ -1,9 +1,56 @@
-# Personal Game AI v0.5.0
+# Personal Game AI v0.6.0
 
-Current release: **v0.5 — Demonstration recording**. See `CHANGELOG.md` for the
+Current release: **v0.6 — Game Profiles + Skills**. See `CHANGELOG.md` for the
 full history and `docs/ARCHITECTURE.md` for the runtime design.
 
-## v0.5 at a glance
+## v0.6 at a glance
+
+- **Profiles:** a game profile is a folder, `profiles/<name>/`, holding a
+  `profile.json` and its template images. The file lists detectors, skills,
+  rules and permissions.
+  - To create one, draw detectors on the preview, add rules, and press
+    **Save Profile…**. Then edit the JSON by hand to add key skills or to
+    enable skills.
+  - **Load Profile** works only while keyboard/mouse control is off.
+- **Skills:** named actions from the profile.
+  - `click` clicks a detector's box.
+  - `press` taps one key.
+  - `hold` holds a key for a set time, 5 s at most.
+- The **Skills** panel lists each skill with an Enabled checkbox and a **Run**
+  button, which focuses the game first.
+- Rules in the profile fire skills automatically once input control is on.
+- **Safety:**
+  - Every skill starts disabled.
+  - Only keys listed in `permissions.allowed_keys` can be sent. F8, the Windows
+    keys and key combos are never allowed.
+  - Key skills only run while the game window is in the foreground.
+  - Only one skill runs at a time, and actions are rate-limited.
+  - F8 releases any held key at once and stops everything.
+- `profiles/example/profile.json` is a small demo for Notepad (`type_x`,
+  `hold_space`). Your own profiles stay local, because `profiles/` is gitignored.
+
+Example `profile.json`:
+
+```json
+{
+  "format_version": 1,
+  "name": "Notepad demo",
+  "permissions": {"allowed_keys": ["x", "space"], "max_hold_seconds": 1.5,
+                  "max_actions_per_second": 5},
+  "detectors": [{"name": "ok_button", "template": "templates/ok_button.png",
+                 "threshold": 0.9, "roi": null}],
+  "skills": [
+    {"name": "press_ok", "type": "click", "detector": "ok_button", "min_confidence": 0.9, "enabled": false},
+    {"name": "type_x", "type": "press", "key": "x", "enabled": false},
+    {"name": "hold_space", "type": "hold", "key": "space", "seconds": 1.0, "enabled": false}
+  ],
+  "rules": [{"name": "auto_ok", "detector": "ok_button", "skill": "press_ok",
+             "min_confidence": 0.9, "cooldown_seconds": 1.0, "enabled": true}],
+  "planner": {"enabled": false, "model": "qwen3.5:9b", "interval_seconds": 5.0}
+}
+```
+
+## v0.5 demonstration recording
 
 - **Recording panel** (default off): press **Record** while capturing to save
   your own play (frames, game state, and your keyboard/mouse input) into
@@ -120,5 +167,6 @@ or protected-process evasion.
 
 ## Next milestone
 
-See `docs/ROADMAP.md`. Candidates include imitation-learning experiments on
-recorded datasets and the v1.0 personal game agent loop.
+See `docs/ROADMAP.md`. Next is v0.7, a closed-loop planner. The local LLM picks
+a skill *name* from the loaded profile, and every step needs your approval
+unless you explicitly switch on auto mode.

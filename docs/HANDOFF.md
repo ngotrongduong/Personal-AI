@@ -18,8 +18,10 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-24)
 
-**v0.6 "Game Profiles + Skills" (Issue #50) is in progress** on the integration
-branch `feature/v0.6-profiles-skills`, branched from `main` at the v0.5.0 release.
+**v0.6.0 "Game Profiles + Skills" (Issue #50) is released.** The
+integration branch `feature/v0.6-profiles-skills` merged into `main` via PR #52
+as a merge commit. Next is v0.7, the closed-loop planner, which needs its own
+kickoff (issue, `feature/*` branch, `docs/PLAN.md`).
 The user chose to move toward v1.0 in steps:
 - v0.6 profiles + skills, no LLM;
 - v0.7 a closed-loop planner that picks skill *names* only, approve-each-step
@@ -40,8 +42,15 @@ Task 7, the live Notepad smoke test, passed on 2026-09-24, including F8 inside
 the real pynput hook releasing a held key at once, a click skill rule, and a
 key skill rule BLOCKED while Notepad was not foreground (details in PLAN row 7).
 Codex was retried on 2026-09-24, but its CLI still reported the usage limit
-(reset 2026-09-25 13:55), so Claude keeps implementing. Next is task R
-(release v0.6.0).
+(reset 2026-09-25 13:55), so Claude keeps implementing. Task R (release
+close-out: CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION =
+"0.6.0"`) followed, then PR #52 closed Issue #50.
+
+Local leftover branches could not be deleted by Claude (a `git branch -D` was
+denied) and are safe for the user to delete: `codex/v0.6-profile`,
+`codex/v0.6-dispatcher`, `claude/v0.6-skills`, `claude/v0.6-executor`,
+`claude/v0.6-profile-ui`, `claude/v0.6-skills-ui`, `claude/v0.6-smoke`,
+`claude/v0.6-release`.
 See `docs/PLAN.md` for the design constraint and checklist.
 
 **v0.5.0 ("Demonstration recording", Issue #41) is released**, merged into
@@ -285,7 +294,9 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.6 task R (release v0.6.0); see `docs/PLAN.md`. Never commit a recording, a profile template PNG or any
+v0.7 kickoff: the closed-loop planner, where the LLM picks a skill *name* from
+the loaded profile, each step is approved by default, and an explicit opt-in
+auto mode exists. See `docs/ROADMAP.md`. Never commit a recording, a profile template PNG or any
 other user data, because the repo is public.
 
 Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set
@@ -321,8 +332,8 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-Issue #50 (v0.6, Game Profiles + Skills). Issue #41 (v0.5), Issue #15 (v0.4),
-Issue #1 (v0.3) and Issue #4 are all completed and closed.
+None. Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3)
+and Issue #4 are all completed and closed.
 
 ## Lessons
 
