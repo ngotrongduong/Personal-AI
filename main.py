@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 import logging
 import math
 import queue
@@ -8,9 +9,10 @@ import time
 from pathlib import Path
 from datetime import datetime
 import tkinter as tk
-from tkinter import ttk, messagebox
+from tkinter import ttk, messagebox, simpledialog
 
 import cv2
+import numpy as np
 from PIL import Image, ImageTk
 from pynput import keyboard
 import win32gui
@@ -21,7 +23,19 @@ from agent.ollama_client import OllamaClientConfig
 from agent.planner_config import PlannerConfig
 from agent.planner_controller import PlannerController
 from agent.planner_scheduler import PlannerCycleReport
-from agent.rule_engine import RuleEngine, VisibilityRule
+from agent.profile import (
+    DetectorDefinition,
+    GameProfile,
+    ProfileError,
+    RuleDefinition,
+    list_profiles,
+    load_profile,
+    profile_slug,
+    read_templates,
+    save_profile,
+)
+from agent.rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
+from agent.skills import ClickSkill, Skill, SkillBook, SkillPermissions
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
@@ -52,6 +66,110 @@ RECORDING_STOP_CAPTURE = "capture_stopped"
 RECORDING_STOP_INPUT_CONTROL = "input_control_enabled"
 # Bounded wait for the writer to finalise session.json when the app closes.
 RECORDING_CLOSE_WAIT_SECONDS = 3.0
+
+PROFILE_NONE_TEXT = "Profile: none loaded. Key skills stay blocked until a profile is loaded."
+
+
+@dataclass(frozen=True, slots=True)
+class ProfileContents:
+    """What Save Profile writes, built from the app's current detectors and rules."""
+
+    detectors: list[tuple[DetectorDefinition, np.ndarray]]
+    skills: list[Skill]
+    rules: list[RuleDefinition]
+    skipped_rules: list[str]
+
+
+def collect_profile_contents(
+    detector_templates: dict[str, tuple[DetectorSpec, np.ndarray]],
+    rule_engine: RuleEngine,
+    profile: GameProfile | None,
+) -> ProfileContents:
+    """Turn the current detectors and rules into profile contents.
+
+    - Every detector with a kept template image is saved.
+    - The loaded profile's skills are kept as written in its file (runtime
+      toggles are not saved); click skills whose detector is gone are dropped.
+    - A UI click rule becomes a rule that fires a click skill on the same
+      detector. New click skills are saved **disabled**, so a saved rule never
+      clicks after loading until the user enables its skill.
+    - Rules whose detector or skill is not saved are skipped and reported.
+    """
+
+    detectors = [
+        (DetectorDefinition(name, "", spec.threshold, spec.roi), template)
+        for name, (spec, template) in detector_templates.items()
+    ]
+    detector_names = set(detector_templates)
+    skills: list[Skill] = [
+        skill
+        for skill in (profile.skills if profile is not None else ())
+        if not isinstance(skill, ClickSkill) or skill.detector in detector_names
+    ]
+    skill_names = {skill.name for skill in skills}
+
+    rules: list[RuleDefinition] = []
+    skipped: list[str] = []
+    for rule in rule_engine.rules:
+        enabled = rule_engine.is_rule_enabled(rule.name)
+        if rule.detector_name not in detector_names:
+            skipped.append(rule.name)
+            continue
+        if rule.skill is not None:
+            if rule.skill not in skill_names:
+                skipped.append(rule.name)
+                continue
+            rules.append(RuleDefinition(rule, enabled))
+            continue
+        if rule.action != "click":
+            skipped.append(rule.name)
+            continue
+        skill_name = _click_skill_for(rule, skills, skill_names)
+        rules.append(
+            RuleDefinition(
+                VisibilityRule(
+                    name=rule.name,
+                    detector_name=rule.detector_name,
+                    action=SKILL_RULE_ACTION,
+                    min_confidence=rule.min_confidence,
+                    max_observation_age_seconds=rule.max_observation_age_seconds,
+                    cooldown_seconds=rule.cooldown_seconds,
+                    skill=skill_name,
+                ),
+                enabled,
+            )
+        )
+    return ProfileContents(detectors, skills, rules, skipped)
+
+
+def _click_skill_for(rule: VisibilityRule, skills: list[Skill], skill_names: set[str]) -> str:
+    """Reuse a matching click skill, or add a new disabled one for `rule`."""
+
+    for skill in skills:
+        if (
+            isinstance(skill, ClickSkill)
+            and skill.detector == rule.detector_name
+            and skill.min_confidence == rule.min_confidence
+            and skill.max_observation_age_seconds == rule.max_observation_age_seconds
+        ):
+            return skill.name
+    base = f"click_{rule.detector_name}"[:60]
+    name = base
+    suffix = 2
+    while name in skill_names:
+        name = f"{base}_{suffix}"
+        suffix += 1
+    skills.append(
+        ClickSkill(
+            name=name,
+            detector=rule.detector_name,
+            min_confidence=rule.min_confidence,
+            max_observation_age_seconds=rule.max_observation_age_seconds,
+            enabled=False,
+        )
+    )
+    skill_names.add(name)
+    return name
 
 
 def _format_duration(seconds: float) -> str:
@@ -139,7 +257,18 @@ class PersonalGameAIApp:
         self.game_state = GameState()
         self._registry_visibility: dict[str, bool] = {}
         self.rule_engine = RuleEngine()
-        self.dispatcher = ActionDispatcher(self.input)
+        # v0.6 profiles. Profiles are read and written only on the Tk thread;
+        # the dispatcher reads the loaded profile's permissions on every key
+        # action, so without a profile no key can be sent.
+        self.profiles_dir = self.base_dir / "profiles"
+        self.profile: GameProfile | None = None
+        self.skill_book: SkillBook | None = None
+        # Settings and template image of every registered detector, kept so
+        # Save Profile can write them.
+        self._detector_templates: dict[str, tuple[DetectorSpec, np.ndarray]] = {}
+        self.dispatcher = ActionDispatcher(
+            self.input, permissions_provider=self._profile_permissions
+        )
         self.planner = PlannerController(self.game_state)
         # Polled on the recording thread: read the plain bool, never a Tk variable.
         self.recorder = RecordingController(
@@ -181,6 +310,9 @@ class PersonalGameAIApp:
         self.detector_name_var = tk.StringVar(value="detector_1")
         self.detectors_var = tk.StringVar(value="Detectors: none registered")
 
+        self.profile_var = tk.StringVar(value="")
+        self.profile_status_var = tk.StringVar(value=PROFILE_NONE_TEXT)
+
         self.rule_name_var = tk.StringVar(value="rule_1")
         self.rule_detector_var = tk.StringVar(value="")
         self.rule_min_confidence_var = tk.DoubleVar(value=0.82)
@@ -209,6 +341,7 @@ class PersonalGameAIApp:
         )
 
         self._build_ui()
+        self.refresh_profiles()
         self._planner_logger = logging.getLogger("agent.planner_scheduler")
         self._planner_logger.setLevel(logging.INFO)
         self._planner_log_handler = _PlannerLogHandler(self)
@@ -254,6 +387,30 @@ class PersonalGameAIApp:
         ttk.Button(
             controls, text="EMERGENCY STOP (F8)", command=self.emergency_stop
         ).pack(side="right")
+
+        profile_box = ttk.LabelFrame(
+            outer, text="Profile — detectors, skills and rules saved per game (load only with input control off)"
+        )
+        profile_box.pack(fill="x", pady=(4, 8))
+
+        profile_row = ttk.Frame(profile_box)
+        profile_row.pack(fill="x", padx=8, pady=(7, 4))
+
+        ttk.Label(profile_row, text="Profile:").pack(side="left")
+        self.profile_combo = ttk.Combobox(
+            profile_row, textvariable=self.profile_var, state="readonly", width=32
+        )
+        self.profile_combo.pack(side="left", padx=(4, 8))
+        ttk.Button(profile_row, text="Refresh", command=self.refresh_profiles).pack(side="left")
+        ttk.Button(
+            profile_row, text="Load Profile", command=self.load_selected_profile
+        ).pack(side="left", padx=5)
+        ttk.Button(
+            profile_row, text="Save Profile…", command=self.save_current_profile
+        ).pack(side="left")
+        ttk.Label(
+            profile_box, textvariable=self.profile_status_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
 
         vision_box = ttk.LabelFrame(outer, text="Vision v0.3 — Template + named detectors")
         vision_box.pack(fill="x", pady=(4, 8))
@@ -781,11 +938,15 @@ class PersonalGameAIApp:
             self.threshold_var.set(self.matcher.threshold)
 
     def _toggle_vision(self):
-        if self.vision_enabled_var.get() and not self.matcher.loaded:
+        if (
+            self.vision_enabled_var.get()
+            and not self.matcher.loaded
+            and not self.registry.names
+        ):
             self.vision_enabled_var.set(False)
             messagebox.showwarning(
                 "No template",
-                "Select a template on the preview first."
+                "Select a template on the preview or load a profile first."
             )
             return
 
@@ -816,6 +977,7 @@ class PersonalGameAIApp:
 
     def clear_detectors(self):
         self.registry.clear()
+        self._detector_templates.clear()
         self._registry_visibility.clear()
         self.game_state.clear()
         self.detectors_var.set("Detectors: none registered")
@@ -844,16 +1006,159 @@ class PersonalGameAIApp:
         )
 
     def clear_rules(self):
+        # The planner holds the old rule engine; stop it before replacing it.
+        self._stop_planner_for("rules were cleared")
+        self.rule_engine = RuleEngine()
+        self.rules_var.set("Rules: 0 active.")
+        self.log("All rules cleared.")
+
+    def _stop_planner_for(self, why: str):
         planner_was_running = self.planner.is_running
         self.planner.stop()
         self._reset_planner_last_cycle()
         self.planner_enabled_var.set(False)
-        self.planner_status_var.set("Planner: disabled because rules were cleared.")
+        self.planner_status_var.set(f"Planner: disabled because {why}.")
         if planner_was_running:
-            self.log("LLM planner stopped because rules were cleared.")
-        self.rule_engine = RuleEngine()
-        self.rules_var.set("Rules: 0 active.")
-        self.log("All rules cleared.")
+            self.log(f"LLM planner stopped because {why}.")
+
+    # ---------------- Profiles ----------------
+
+    def _profile_permissions(self) -> SkillPermissions | None:
+        """Called by the dispatcher, possibly on a worker thread (one attribute read)."""
+        profile = self.profile
+        return profile.permissions if profile is not None else None
+
+    def refresh_profiles(self):
+        try:
+            names = list_profiles(self.profiles_dir)
+        except OSError as exc:
+            names = []
+            self.log(f"Could not list profiles: {exc}")
+        self.profile_combo["values"] = names
+        if self.profile_var.get() not in names:
+            self.profile_var.set(names[0] if names else "")
+
+    def load_selected_profile(self):
+        # Loading replaces the rules; with input off, none of them can fire
+        # during the swap.
+        if self.input.enabled or self.control_var.get():
+            messagebox.showwarning(
+                "Load Profile", "Disable keyboard/mouse control before loading a profile."
+            )
+            return
+        folder_name = self.profile_var.get().strip()
+        if not folder_name:
+            messagebox.showwarning("Load Profile", "Choose a profile first.")
+            return
+
+        # Build everything before touching the app, so a bad profile changes nothing.
+        try:
+            profile = load_profile(self.profiles_dir / folder_name)
+            templates = read_templates(profile)
+            registry = DetectorRegistry()
+            kept: dict[str, tuple[DetectorSpec, np.ndarray]] = {}
+            for detector in profile.detectors:
+                spec = detector.spec()
+                registry.register_array(spec, templates[detector.name])
+                kept[detector.name] = (spec, templates[detector.name])
+            skill_book = profile.skill_book()
+            rule_engine = profile.rule_engine()
+        except (ProfileError, ValueError, RuntimeError, cv2.error) as exc:
+            self.log(f"Profile '{folder_name}' not loaded: {exc}")
+            messagebox.showerror("Load Profile", str(exc))
+            return
+
+        self._stop_planner_for("a profile was loaded")
+        self.registry = registry
+        self._detector_templates = kept
+        self._registry_visibility.clear()
+        self.game_state.clear()
+        self.rule_engine = rule_engine
+        self.skill_book = skill_book
+        self.profile = profile
+
+        if profile.detectors:
+            self.detectors_var.set(
+                f"Detectors: {len(profile.detectors)} registered from profile."
+            )
+            self.vision_enabled_var.set(True)
+        else:
+            self.detectors_var.set("Detectors: none registered")
+        self.rules_var.set(f"Rules: {len(rule_engine.rules)} active.")
+        enabled = sum(skill_book.is_enabled(name) for name in skill_book.names)
+        self.profile_status_var.set(
+            f"Profile: {profile.name} (profiles/{folder_name}) · "
+            f"{len(profile.detectors)} detectors · {len(skill_book.names)} skills "
+            f"({enabled} enabled) · {len(rule_engine.rules)} rules"
+        )
+        self.log(
+            f"Profile '{profile.name}' loaded from profiles/{folder_name}. "
+            "Input control is still off."
+        )
+
+    def save_current_profile(self):
+        contents = collect_profile_contents(
+            self._detector_templates, self.rule_engine, self.profile
+        )
+        if not contents.detectors and not contents.skills:
+            messagebox.showwarning(
+                "Save Profile",
+                "Nothing to save yet: register a detector on the preview or load a profile first.",
+            )
+            return
+
+        name = simpledialog.askstring(
+            "Save Profile",
+            "Profile name:",
+            initialvalue=self.profile.name if self.profile is not None else "",
+            parent=self.root,
+        )
+        if name is None:
+            return
+        try:
+            slug = profile_slug(name)
+        except ProfileError as exc:
+            messagebox.showerror("Save Profile", str(exc))
+            return
+
+        overwrite = False
+        if (self.profiles_dir / slug).exists():
+            if not messagebox.askyesno(
+                "Save Profile",
+                f"profiles/{slug} already exists. Replace its profile.json and "
+                "template images? Other files in the folder are kept.",
+            ):
+                return
+            overwrite = True
+
+        try:
+            save_profile(
+                self.profiles_dir,
+                name,
+                detectors=contents.detectors,
+                skills=contents.skills,
+                rules=contents.rules,
+                permissions=self.profile.permissions if self.profile is not None else None,
+                planner=self.profile.planner if self.profile is not None else None,
+                overwrite=overwrite,
+            )
+        except (ProfileError, ValueError) as exc:
+            self.log(f"Profile not saved: {exc}")
+            messagebox.showerror("Save Profile", str(exc))
+            return
+
+        self.refresh_profiles()
+        self.profile_var.set(slug)
+        self.log(
+            f"Profile saved to profiles/{slug}: {len(contents.detectors)} detectors, "
+            f"{len(contents.skills)} skills, {len(contents.rules)} rules. "
+            "New click skills are saved disabled; edit profile.json to add key skills."
+        )
+        if contents.skipped_rules:
+            self.log(
+                "Rules not saved (their detector or skill is missing): "
+                + ", ".join(contents.skipped_rules)
+            )
 
     def _toggle_planner(self):
         if not self.planner_enabled_var.get():
@@ -1012,9 +1317,11 @@ class PersonalGameAIApp:
         if detector_name:
             try:
                 self.registry.unregister(detector_name)
+                self._detector_templates.pop(detector_name, None)
                 self._registry_visibility.pop(detector_name, None)
                 spec = DetectorSpec(name=detector_name, threshold=self.threshold_var.get())
                 self.registry.register_array(spec, roi)
+                self._detector_templates[detector_name] = (spec, roi)
                 self.log(
                     f"Detector '{detector_name}' registered "
                     f"({len(self.registry.names)} total)."
