@@ -26,7 +26,10 @@ Task 0 (kickoff) is done:
 - the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
 - the `AGENTS.md` memory invariant;
 - `memory/` gitignored;
-- the draft release PR feature→`main`.
+- the draft release PR feature→`main` (PR #73), kickoff merged via PR #72.
+
+Task 1 (`agent/session_log.py`: strict schema, fail-soft 5 MB-capped writer,
+reader/validator) is done.
 
 v0.8 adds a per-planner-session JSONL log and bounded per-profile notes. The
 user edits the notes, and the LLM may add some through a `remember` directive
@@ -364,7 +367,7 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 task 1, `agent/session_log.py`, then tasks 2–6 in the order given in
+v0.8 task 2, `agent/notes.py`, then tasks 3–6 in the order given in
 `docs/PLAN.md`. Each task lands through a `claude/…` or `codex/…` PR into
 `feature/v0.8-session-memory`. Codex's quota resets 2026-09-25 13:55, so
 pure-logic tasks can go to Codex again after that.
