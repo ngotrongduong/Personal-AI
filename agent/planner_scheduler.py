@@ -32,6 +32,10 @@ class PlannerCycleReport:
 
 
 CycleCallback = Callable[[PlannerCycleReport], None]
+PlanGate = Callable[[], bool]
+
+# How often a closed ``should_plan`` gate is re-checked.
+GATE_POLL_SECONDS = 0.25
 
 
 class Planner(Protocol):
@@ -48,6 +52,10 @@ class PlannerScheduler:
     interval wait. It cannot interrupt a planner call that is already in flight,
     so callers should continue to configure bounded timeouts for the planner's
     network client.
+
+    ``should_plan`` (optional) is checked before every cycle on the scheduler
+    thread; while it returns False (or raises) the planner is not called and
+    no cycle is reported.
     """
 
     def __init__(
@@ -57,6 +65,7 @@ class PlannerScheduler:
         *,
         interval_seconds: float = 5.0,
         on_cycle: CycleCallback | None = None,
+        should_plan: PlanGate | None = None,
     ) -> None:
         if interval_seconds <= 0:
             raise ValueError("interval_seconds must be positive.")
@@ -65,6 +74,7 @@ class PlannerScheduler:
         self._state = state
         self._interval_seconds = interval_seconds
         self._on_cycle = on_cycle
+        self._should_plan = should_plan
         self._lifecycle_lock = threading.RLock()
         self._stop_event = threading.Event()
         self._thread: threading.Thread | None = None
@@ -129,6 +139,13 @@ class PlannerScheduler:
     def _run(self, stop_event: threading.Event) -> None:
         try:
             while not stop_event.is_set():
+                if not self._gate_open():
+                    # A step is pending or running: skip without calling the
+                    # planner or reporting, and look again shortly.
+                    if stop_event.wait(min(self._interval_seconds, GATE_POLL_SECONDS)):
+                        break
+                    continue
+
                 started_at = time.monotonic()
                 try:
                     outcome = self._planner.plan_once(self._state)
@@ -149,6 +166,16 @@ class PlannerScheduler:
             with self._lifecycle_lock:
                 if self._thread is threading.current_thread():
                     self._thread = None
+
+    def _gate_open(self) -> bool:
+        if self._should_plan is None:
+            return True
+        try:
+            return bool(self._should_plan())
+        except Exception:
+            # Fail closed: a broken gate never lets a cycle through.
+            logger.exception("Planner should_plan gate failed; skipping this cycle.")
+            return False
 
     def _report_cycle(
         self,

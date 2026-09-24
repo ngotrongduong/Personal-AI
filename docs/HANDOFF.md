@@ -23,7 +23,9 @@ file and `docs/PLAN.md` in the same push as the work.
 Task 0 (kickoff: issue, branch, `docs/PLAN.md` spec, `AGENTS.md` planner
 invariant, draft PR #63 feature→`main`) and task 1 (`run_skill`
 directive, closed-loop prompt, `StepHistory`, `ProposalMailbox`) and task 2
-(`Autopilot` approve/auto state machine) are done. The user approved the
+(`Autopilot` approve/auto state machine) and task 3 (scheduler `should_plan`
+gate, cancellable proposal sink with a generation per start; `stop()` clears
+the mailbox; safety-reviewer passed) are done. The user approved the
 design on 2026-09-24:
 - the LLM proposes `run_skill` with a skill name only;
 - approve-each-step is the default, and auto mode is opt-in with a step cap and
@@ -308,8 +310,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 task 3: the scheduler `should_plan` gate and the controller wiring
-(cancellable proposal sink, generation per start; see `docs/PLAN.md`).
+v0.7 task 4: `planner.goal` and `planner.auto_max_steps` in `PlannerConfig`,
+the profile loader and `save_profile` (see `docs/PLAN.md`). In task 5 the
+`should_plan` gate must stay thread-safe (mailbox/executor state only, never
+Tk variables).
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
 
