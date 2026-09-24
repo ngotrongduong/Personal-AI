@@ -34,8 +34,9 @@ from agent.profile import (
     read_templates,
     save_profile,
 )
-from agent.rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
-from agent.skills import ClickSkill, Skill, SkillBook, SkillPermissions
+from agent.rule_engine import SKILL_RULE_ACTION, ActionIntent, RuleEngine, VisibilityRule
+from agent.skill_executor import SkillExecutor
+from agent.skills import ClickSkill, HoldSkill, PressSkill, Skill, SkillBook, SkillPermissions
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
@@ -68,6 +69,20 @@ RECORDING_STOP_INPUT_CONTROL = "input_control_enabled"
 RECORDING_CLOSE_WAIT_SECONDS = 3.0
 
 PROFILE_NONE_TEXT = "Profile: none loaded. Key skills stay blocked until a profile is loaded."
+SKILLS_NONE_TEXT = "Skills: none. Load a profile to list its skills."
+SKILLS_PER_ROW = 2
+SKILL_NO_RESULT_TEXT = "—"
+
+
+def describe_skill(skill: Skill | None) -> str:
+    """Short, display-only summary of what a skill does."""
+    if isinstance(skill, ClickSkill):
+        return f"click {skill.detector}"
+    if isinstance(skill, PressSkill):
+        return f"press {skill.key}"
+    if isinstance(skill, HoldSkill):
+        return f"hold {skill.key} {skill.seconds:g}s"
+    return "unknown"
 
 
 @dataclass(frozen=True, slots=True)
@@ -269,6 +284,10 @@ class PersonalGameAIApp:
         self.dispatcher = ActionDispatcher(
             self.input, permissions_provider=self._profile_permissions
         )
+        # Skills (manual Run and skill rules) run one at a time on the
+        # executor's worker thread, so a hold never blocks Tk. Results come
+        # back through executor.drain() in _poll_preview.
+        self.executor = SkillExecutor(self.dispatcher)
         self.planner = PlannerController(self.game_state)
         # Polled on the recording thread: read the plain bool, never a Tk variable.
         self.recorder = RecordingController(
@@ -312,6 +331,13 @@ class PersonalGameAIApp:
 
         self.profile_var = tk.StringVar(value="")
         self.profile_status_var = tk.StringVar(value=PROFILE_NONE_TEXT)
+        self.skills_status_var = tk.StringVar(value=SKILLS_NONE_TEXT)
+        # Skill name -> (Enabled checkbox variable, last-result text), one per
+        # row of the Skills panel; rebuilt whenever a profile is loaded.
+        self._skill_rows: dict[str, tuple[tk.BooleanVar, tk.StringVar]] = {}
+        # Name of the skill last submitted; it is the running one while
+        # executor.busy (Tk thread only).
+        self._running_skill: str | None = None
 
         self.rule_name_var = tk.StringVar(value="rule_1")
         self.rule_detector_var = tk.StringVar(value="")
@@ -411,6 +437,17 @@ class PersonalGameAIApp:
         ttk.Label(
             profile_box, textvariable=self.profile_status_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
+
+        skills_box = ttk.LabelFrame(
+            outer,
+            text="Skills — from the loaded profile (off by default; run only with input control on)",
+        )
+        skills_box.pack(fill="x", pady=(0, 8))
+        self.skills_frame = ttk.Frame(skills_box)
+        self.skills_frame.pack(fill="x", padx=8, pady=(7, 0))
+        ttk.Label(
+            skills_box, textvariable=self.skills_status_var
+        ).pack(anchor="w", padx=8, pady=(2, 7))
 
         vision_box = ttk.LabelFrame(outer, text="Vision v0.3 — Template + named detectors")
         vision_box.pack(fill="x", pady=(4, 8))
@@ -711,6 +748,9 @@ class PersonalGameAIApp:
             if self._request_recording_stop(RECORDING_STOP_INPUT_CONTROL):
                 self.log("Recording stopped because input control was enabled.")
         self.input.set_enabled(self.control_var.get())
+        if not self.control_var.get():
+            # Input is already off, so a held key is released; end the skill too.
+            self.executor.cancel()
         if self.control_var.get():
             self.status_var.set("INPUT ENABLED")
             self.log("Keyboard/mouse control ENABLED.")
@@ -764,6 +804,8 @@ class PersonalGameAIApp:
     def emergency_stop(self, recording_reason: str = RECORDING_STOP_F8):
         # Release input first; nothing should delay disabling input.
         self.input.set_enabled(False)
+        # Then end the running skill (its held key is already released).
+        self.executor.cancel()
         self.control_var.set(False)
         self.status_var.set("EMERGENCY STOP (F8)")
         planner_was_running = self.planner.is_running
@@ -785,6 +827,11 @@ class PersonalGameAIApp:
     def _start_hotkey_listener(self):
         def on_press(key):
             if key == keyboard.Key.f8:
+                # Stop input right here on the listener thread: the Tk thread
+                # may be busy, and a running hold must not wait for it. Both
+                # calls are thread-safe; emergency_stop then does the rest.
+                self.input.set_enabled(False)
+                self.executor.cancel()
                 self.root.after(0, self.emergency_stop)
 
         self.hotkey_listener = keyboard.Listener(on_press=on_press)
@@ -1046,6 +1093,13 @@ class PersonalGameAIApp:
                 "Load Profile", "Disable keyboard/mouse control before loading a profile."
             )
             return
+        if self.executor.busy:
+            messagebox.showwarning(
+                "Load Profile", "A skill is still stopping; try Load again in a moment."
+            )
+            return
+        # Log finished runs under the profile they belong to.
+        self._drain_skill_runs()
         folder_name = self.profile_var.get().strip()
         if not folder_name:
             messagebox.showwarning("Load Profile", "Choose a profile first.")
@@ -1076,6 +1130,7 @@ class PersonalGameAIApp:
         self.rule_engine = rule_engine
         self.skill_book = skill_book
         self.profile = profile
+        self._rebuild_skills_panel()
 
         if profile.detectors:
             self.detectors_var.set(
@@ -1159,6 +1214,144 @@ class PersonalGameAIApp:
                 "Rules not saved (their detector or skill is missing): "
                 + ", ".join(contents.skipped_rules)
             )
+
+    # ---------------- Skills ----------------
+
+    def _rebuild_skills_panel(self):
+        for child in self.skills_frame.winfo_children():
+            child.destroy()
+        self._skill_rows = {}
+        book = self.skill_book
+        if book is None or not book.names:
+            self.skills_status_var.set(
+                SKILLS_NONE_TEXT if book is None else "Skills: this profile has none."
+            )
+            return
+        for index, name in enumerate(book.names):
+            row, slot = divmod(index, SKILLS_PER_ROW)
+            column = slot * 3
+            enabled_var = tk.BooleanVar(value=book.is_enabled(name))
+            result_var = tk.StringVar(value=SKILL_NO_RESULT_TEXT)
+            ttk.Checkbutton(
+                self.skills_frame,
+                text=f"{name} ({describe_skill(book.get(name))})",
+                variable=enabled_var,
+                command=lambda n=name: self._toggle_skill(n),
+            ).grid(row=row, column=column, sticky="w", pady=1)
+            ttk.Button(
+                self.skills_frame, text="Run", width=5, command=lambda n=name: self.run_skill(n)
+            ).grid(row=row, column=column + 1, padx=4)
+            ttk.Label(
+                self.skills_frame, textvariable=result_var, width=36
+            ).grid(row=row, column=column + 2, sticky="w", padx=(0, 12))
+            self._skill_rows[name] = (enabled_var, result_var)
+        self._update_skills_status()
+
+    def _update_skills_status(self):
+        book = self.skill_book
+        if book is None:
+            self.skills_status_var.set(SKILLS_NONE_TEXT)
+            return
+        enabled = sum(book.is_enabled(name) for name in book.names)
+        self.skills_status_var.set(
+            f"Skills: {len(book.names)} ({enabled} enabled). Key skills only run while "
+            "the game window is in the foreground; Run focuses it first."
+        )
+
+    def _set_skill_result(self, name: str, text: str):
+        row = self._skill_rows.get(name)
+        if row is not None:
+            row[1].set(text)
+
+    def _toggle_skill(self, name: str):
+        book = self.skill_book
+        row = self._skill_rows.get(name)
+        if book is None or row is None or book.get(name) is None:
+            return
+        enabled = bool(row[0].get())
+        book.set_enabled(name, enabled)
+        self._update_skills_status()
+        self.log(f"Skill '{name}' {'ENABLED' if enabled else 'DISABLED'}.")
+        # A disabled skill never runs: end it if it is running right now.
+        if not enabled and self.executor.busy and self._running_skill == name:
+            self.executor.cancel()
+            self.log(f"Running skill '{name}' cancelled because it was disabled.")
+
+    def _skill_blocked(self, name: str, source: str, reason: str):
+        self._set_skill_result(name, f"BLOCKED: {reason}")
+        self.log(f"Skill '{name}' ({source}) -> BLOCKED: {reason}")
+
+    def run_skill(self, name: str):
+        """Run button: focus the game window, then run one skill on the executor."""
+        book = self.skill_book
+        if book is None or book.get(name) is None:
+            return
+        if not self.input.enabled:
+            messagebox.showwarning("Run Skill", "Enable keyboard/mouse control first.")
+            return
+        # Everything that can refuse is checked before focusing, so a refused
+        # Run never moves the focus.
+        if self.executor.busy:
+            self._skill_blocked(name, "manual", "Busy: another skill is running.")
+            return
+        if isinstance(book.get(name), ClickSkill) and self.capture is None:
+            # A click target comes from the captured frames of one window.
+            self._skill_blocked(name, "manual", "Start Capture first; click skills aim at captured detections.")
+            return
+        built = book.build_intent(name, self.game_state, source="manual")
+        if built.intent is None:
+            self._skill_blocked(name, "manual", f"{built.reason}.")
+            return
+        try:
+            # Same window as the rules: the one the frames come from.
+            hwnd = self.capture.hwnd if self.capture else self.selected_hwnd()
+            if not focus_window(hwnd, settle_seconds=0.15):
+                self.log("Windows did not confirm the game window is in the foreground.")
+        except Exception as exc:
+            self._skill_blocked(name, "manual", str(exc))
+            return
+
+        # Rebuilt after focusing so the intent is fresh and the detection is
+        # re-checked.
+        built = book.build_intent(name, self.game_state, source="manual")
+        if built.intent is None:
+            self._skill_blocked(name, "manual", f"{built.reason}.")
+            return
+        refusal = self.executor.submit(built.intent, hwnd=hwnd, source="manual")
+        if refusal is not None:
+            self._skill_blocked(name, "manual", refusal)
+            return
+        self._running_skill = name
+        self._set_skill_result(name, "running…")
+        self.log(f"Skill '{name}' started (manual): {built.intent.reason}")
+
+    def _submit_rule_skill(self, intent: ActionIntent, hwnd: int | None) -> tuple[str, str]:
+        """Start the skill a fired skill rule names. Returns (outcome, reason)."""
+        book = self.skill_book
+        name = intent.skill_name or ""
+        if book is None:
+            return "blocked", "No profile loaded; skill rules cannot run."
+        # Same first gate as the dispatcher; skips a worker thread per firing.
+        if not self.input.enabled:
+            return "blocked", "Input control is disabled."
+        built = book.build_intent(name, self.game_state, source=intent.rule_name)
+        if built.intent is None:
+            return "blocked", f"{built.reason}."
+        refusal = self.executor.submit(built.intent, hwnd=hwnd, source=f"rule {intent.rule_name}")
+        if refusal is not None:
+            return "blocked", refusal
+        self._running_skill = name
+        self._set_skill_result(name, "running…")
+        return "submitted", f"skill '{name}' started."
+
+    def _drain_skill_runs(self):
+        for run in self.executor.drain():
+            intent = run.result.intent
+            name = intent.skill_name or intent.action
+            outcome = "DONE" if run.result.dispatched else "BLOCKED"
+            finished = datetime.fromtimestamp(run.finished_at).strftime("%H:%M:%S")
+            self._set_skill_result(name, f"{finished} {outcome}: {run.result.reason}")
+            self.log(f"Skill '{name}' ({run.source}) -> {outcome}: {run.result.reason}")
 
     def _toggle_planner(self):
         if not self.planner_enabled_var.get():
@@ -1409,12 +1602,20 @@ class PersonalGameAIApp:
 
                 last_outcome = "blocked"
                 for intent in intents:
-                    result = self.dispatcher.dispatch(intent, hwnd=hwnd)
-                    last_outcome = "dispatched" if result.dispatched else "blocked"
+                    if intent.action == SKILL_RULE_ACTION:
+                        # Profile rules name a skill; it runs on the executor
+                        # and its result is logged when drained.
+                        last_outcome, reason = self._submit_rule_skill(intent, hwnd)
+                    else:
+                        # UI click rules are quick, so they still dispatch here;
+                        # the dispatcher refuses them while a skill holds a key.
+                        result = self.dispatcher.dispatch(intent, hwnd=hwnd)
+                        last_outcome = "dispatched" if result.dispatched else "blocked"
+                        reason = result.reason
                     self.log(
                         f"Rule '{intent.rule_name}' target={intent.detector_name} "
                         f"confidence={intent.confidence:.2f} -> "
-                        f"{last_outcome.upper()}: {result.reason}"
+                        f"{last_outcome.upper()}: {reason}"
                     )
 
                 self.rules_var.set(
@@ -1430,6 +1631,7 @@ class PersonalGameAIApp:
 
         self._drain_recording_status()
         self._sync_recording_state()
+        self._drain_skill_runs()
 
         if self.capture:
             frame = self.capture.latest_frame()
@@ -1513,6 +1715,8 @@ class PersonalGameAIApp:
         self._closing = True
         try:
             self.emergency_stop(recording_reason=RECORDING_STOP_APP_CLOSE)
+            # Input is off; refuse new skills and wait briefly for a running one.
+            self.executor.shutdown()
             self.stop_capture(silent=True)
             if getattr(self, "hotkey_listener", None):
                 self.hotkey_listener.stop()
