@@ -31,14 +31,15 @@ Task 0 (kickoff) covered the issue, the branch, `docs/PLAN.md`,
 `AGENTS.md`, this file, `docs/ROADMAP.md`, `profiles/*` gitignored, and the
 draft PR feature→`main` (PR #51; the draft release PR is #52). Task 1
 (`agent/skills.py`) merged via PR #53, task 2 (`agent/profile.py` plus
-`profiles/example/profile.json`) via PR #54. Task 3 (dispatcher `press`/`hold`,
-foreground check, allowlist re-check, rate limit, cancel) is done by Claude on
-`claude/v0.6-dispatcher` with a safety-reviewer pass. Codex was retried on
-2026-09-24 for tasks 2 and 3, but its CLI still reported the usage limit
-(reset 2026-09-25 13:55), so Claude keeps implementing. Next is task 4
-(`agent/skill_executor.py`: one worker, busy-reject, `cancel()` that calls
-`ActionDispatcher.cancel()`, results via `SimpleQueue`). See `docs/PLAN.md` for
-the design constraint and checklist.
+`profiles/example/profile.json`) via PR #54, task 3 (dispatcher `press`/`hold`,
+foreground check, allowlist re-check, rate limit, cancel) via PR #55. Task 4
+(`agent/skill_executor.py`) is done by Claude on `claude/v0.6-executor` with a
+safety-reviewer pass. Codex was retried on 2026-09-24, but its CLI still
+reported the usage limit (reset 2026-09-25 13:55), so Claude keeps
+implementing. Next is task 5 (UI Profile panel). Task 6 must run skills on the
+executor, never the Tk thread, and the F8 listener must call
+`input.set_enabled(False)` and `executor.cancel()` directly (see PLAN row 3).
+See `docs/PLAN.md` for the design constraint and checklist.
 
 **v0.5.0 ("Demonstration recording", Issue #41) is released**, merged into
 `main` via PR #43 as a merge commit (`2f1e408`).

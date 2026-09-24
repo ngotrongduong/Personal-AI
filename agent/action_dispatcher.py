@@ -123,7 +123,7 @@ class ActionDispatcher:
         """Run `intent` if every gate passes. A hold blocks for its duration.
 
         `cancel_event`, if given, ends a hold early when set; if it is already
-        set, the hold is rejected before any key goes down.
+        set, the action is rejected before any key or click is sent.
         """
 
         current = time.monotonic() if now is None else now
@@ -144,10 +144,14 @@ class ActionDispatcher:
 
         if intent.action in KEY_ACTIONS:
             return self._dispatch_key(intent, hwnd, current, cancel_event)
-        return self._dispatch_click(intent, hwnd, current)
+        return self._dispatch_click(intent, hwnd, current, cancel_event)
 
     def _dispatch_click(
-        self, intent: ActionIntent, hwnd: int | None, current: float
+        self,
+        intent: ActionIntent,
+        hwnd: int | None,
+        current: float,
+        cancel_event: threading.Event | None,
     ) -> DispatchResult:
         if intent.target_bbox is None:
             return DispatchResult(intent, False, "Intent has no target location.")
@@ -167,6 +171,10 @@ class ActionDispatcher:
         refusal = self._admit(self._permissions(), current)
         if refusal is not None:
             return DispatchResult(intent, False, refusal)
+
+        if cancel_event is not None and cancel_event.is_set():
+            self._forget(current)
+            return DispatchResult(intent, False, "Cancelled before the click was sent.")
 
         try:
             self._input.click(screen_x, screen_y)

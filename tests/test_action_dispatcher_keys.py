@@ -306,6 +306,20 @@ class RateLimitTests(KeyDispatchTestCase):
         self.input.fail_click = None
         self.assertTrue(self.dispatcher.dispatch(click, hwnd=HWND, now=now).dispatched)
 
+    def test_cancelled_click_sends_nothing_and_frees_the_slot(self) -> None:
+        self.permissions = SkillPermissions(
+            allowed_keys=frozenset({"x"}), max_actions_per_second=1
+        )
+        now = 5.0
+        click = _intent("click", created_at=now, bbox=(10, 20, 30, 40))
+        cancelled = threading.Event()
+        cancelled.set()
+        result = self.dispatcher.dispatch(click, hwnd=HWND, now=now, cancel_event=cancelled)
+        self.assertFalse(result.dispatched)
+        self.assertIn("Cancelled", result.reason)
+        self.assertEqual(self.input.calls, [])
+        self.assertTrue(self.dispatcher.dispatch(click, hwnd=HWND, now=now).dispatched)
+
     def test_click_does_not_need_foreground_or_keys(self) -> None:
         self.foreground = False
         click = _intent("click", bbox=(10, 20, 30, 40))
