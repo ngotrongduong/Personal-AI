@@ -554,6 +554,8 @@ def _planner_block(planner: PlannerConfig) -> dict[str, object]:
     block: dict[str, object] = {
         "enabled": planner.enabled,
         "interval_seconds": planner.interval_seconds,
+        "goal": planner.goal,
+        "auto_max_steps": planner.auto_max_steps,
     }
     if planner.ollama is not None:
         block.update(

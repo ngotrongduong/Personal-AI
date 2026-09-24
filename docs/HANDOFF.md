@@ -25,7 +25,9 @@ invariant, draft PR #63 feature→`main`) and task 1 (`run_skill`
 directive, closed-loop prompt, `StepHistory`, `ProposalMailbox`) and task 2
 (`Autopilot` approve/auto state machine) and task 3 (scheduler `should_plan`
 gate, cancellable proposal sink with a generation per start; `stop()` clears
-the mailbox; safety-reviewer passed) are done. The user approved the
+the mailbox; safety-reviewer passed) and task 4 (`planner.goal` /
+`planner.auto_max_steps` in `PlannerConfig`, the loader and `save_profile`)
+are done. The user approved the
 design on 2026-09-24:
 - the LLM proposes `run_skill` with a skill name only;
 - approve-each-step is the default, and auto mode is opt-in with a step cap and
@@ -310,10 +312,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.7 task 4: `planner.goal` and `planner.auto_max_steps` in `PlannerConfig`,
-the profile loader and `save_profile` (see `docs/PLAN.md`). In task 5 the
-`should_plan` gate must stay thread-safe (mailbox/executor state only, never
-Tk variables).
+v0.7 task 5: the UI Planner panel in `main.py` (Goal field, Approve/Auto mode,
+proposal line with Approve/Reject and TTL, auto step counter), executor wiring
+and the auto-off triggers (see `docs/PLAN.md`). The `should_plan` gate must
+stay thread-safe (mailbox/executor state only, never Tk variables), and the
+planner cycle report and log handler must move from `root.after` to a queue
+drained in `_poll_preview`.
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
 

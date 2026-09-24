@@ -35,6 +35,33 @@ class PlannerConfigTests(unittest.TestCase):
         self.assertEqual(config.ollama.port, 12434)
         self.assertEqual(config.interval_seconds, 7.0)
 
+    def test_goal_and_auto_max_steps_default_and_parse(self) -> None:
+        default = load_planner_config({"planner": {"enabled": False}})
+        self.assertEqual(default.goal, "")
+        self.assertEqual(default.auto_max_steps, 20)
+
+        config = load_planner_config(
+            {"planner": {"enabled": False, "goal": "Collect coins.", "auto_max_steps": 100}}
+        )
+        self.assertEqual(config.goal, "Collect coins.")
+        self.assertEqual(config.auto_max_steps, 100)
+
+    def test_goal_and_auto_max_steps_are_validated(self) -> None:
+        bad_blocks = [
+            ({"goal": 5}, "goal must be a string"),
+            ({"goal": None}, "goal must be a string"),
+            ({"goal": "g" * 501}, "at most 500"),
+            ({"auto_max_steps": 0}, "between 1 and 100"),
+            ({"auto_max_steps": 101}, "between 1 and 100"),
+            ({"auto_max_steps": True}, "must be an integer"),
+            ({"auto_max_steps": 5.0}, "must be an integer"),
+            ({"auto_max_steps": "5"}, "must be an integer"),
+        ]
+        for block, message in bad_blocks:
+            with self.subTest(block=block):
+                with self.assertRaisesRegex(ValueError, message):
+                    load_planner_config({"planner": {"enabled": False, **block}})
+
     def test_enabled_planner_requires_model(self) -> None:
         with self.assertRaisesRegex(ValueError, "model"):
             load_planner_config({"planner": {"enabled": True}})

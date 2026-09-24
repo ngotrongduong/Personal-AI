@@ -19,6 +19,8 @@ from agent.profile import (
     profile_slug,
     save_profile,
 )
+from agent.ollama_client import OllamaClientConfig
+from agent.planner_config import PlannerConfig
 from agent.rule_engine import SKILL_RULE_ACTION, VisibilityRule
 from agent.skills import ClickSkill, HoldSkill, PressSkill, SkillPermissions
 from vision.detector_registry import DetectorRegistry
@@ -332,6 +334,23 @@ class SaveProfileTests(unittest.TestCase):
             cv2.IMREAD_COLOR,
         )
         np.testing.assert_array_equal(template, _template())
+
+    def test_planner_goal_and_auto_max_steps_round_trip(self) -> None:
+        planner = PlannerConfig(
+            enabled=True,
+            ollama=OllamaClientConfig(model="qwen3.5:9b"),
+            interval_seconds=4.0,
+            goal="Type an x when the status bar shows.",
+            auto_max_steps=7,
+        )
+        folder = self._save(planner=planner)
+
+        profile = load_profile(folder, DetectorRegistry())
+
+        self.assertEqual(profile.planner.goal, "Type an x when the status bar shows.")
+        self.assertEqual(profile.planner.auto_max_steps, 7)
+        self.assertEqual(profile.planner.interval_seconds, 4.0)
+        self.assertEqual(profile.planner.ollama.model, "qwen3.5:9b")
 
     def test_refuses_to_overwrite_without_flag(self) -> None:
         folder = self._save()
