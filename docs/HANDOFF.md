@@ -26,7 +26,8 @@ release). Task 0 (kickoff: issue, branch, `docs/PLAN.md`, `AGENTS.md`,
 `recording/input_recorder.py`) were implemented by Claude and merged via
 PR #44 because Codex hit its usage limit (reset 2026-09-25 13:55). Task 4
 (`recording/recorder_controller.py`, `RecordingController`) was also done by
-Claude on `claude/v0.5-recorder-controller`; 204/204 tests pass. See `docs/PLAN.md` for the design
+Claude and merged via PR #45. Task 5 (the `main.py` "Recording" panel) was done
+by Claude on `claude/v0.5-recording-panel`; 223/223 tests pass. See `docs/PLAN.md` for the design
 constraint (recording only listens, never sends input, is mutually exclusive
 with autonomous input control, and records input only while the game window is
 foreground).
@@ -246,23 +247,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.5 task 5 (Issue #41, `docs/PLAN.md`): the `main.py` "Recording" panel on
-top of `RecordingController` (tasks 1-4 are done). Wiring notes: construct it
-with `input_control_enabled=lambda: self.input.enabled` (a plain thread-safe
-read; never a Tk variable, it is polled on the sampler thread) — the controller
-refuses `start` (`RecordingRefusedError`) and stops itself while input control
-is on, as defence in depth behind the UI gate. Call `start(...)`/`stop(reason)`
-from the Tk thread (both return immediately); `on_status` runs on the sampler
-thread, so marshal it with `root.after(0)` + a generation counter like the
-planner panel; show `"stopping"` as such, and flip the button back to Record on
-`"failed"`/`"stopped"` (including self-stops `max_duration` / `low_disk` /
-`window_closed` / `input_control_enabled`); `start` returns False while a
-previous session is still closing. F8 and window close call
-`stop("f8")`/`stop("app_close")` after input release and planner stop;
-enabling input control calls `stop("input_control_enabled")`; Record is
-disabled while input control is on or capture is off. On close, `wait_stopped`
-with a short bounded timeout is acceptable, never an unbounded wait on the Tk
-thread.
+v0.5 task 6 (Issue #41, `docs/PLAN.md`): `recording/dataset.py` +
+`scripts/recordings.py` (`list` / `validate` / `export` / `review`). Tasks 1-5
+are done: the `main.py` "Recording" panel (task 5) drives `RecordingController`
+and writes sessions to `recordings/<stamp>/`. A real session for testing the CLI
+can be made by capturing any harmless window (e.g. Notepad) and pressing Record;
+never commit it (the repo is public).
 
 Notes for task 6: frames come from the sampler thread and input from pynput
 threads, so `events.jsonl` lines are in enqueue order and `t` may step back by
@@ -274,13 +264,17 @@ For task 7: check DPI scaling on the live smoke (the repo never calls
 disagree at 125-150% scale); injected input (Steam Input, on-screen keyboard,
 remote desktop) is intentionally not recorded; confirm the captured hwnd is the
 top-level window (foreground is compared with `==`, so a child hwnd would record
-no input). Then task 6 (review/export),
-7 (Claude live smoke), R (release). Ollama and
+no input). After task 6: 7 (Claude live smoke,
+which also exercises the Recording panel on a real game window), R (release). Ollama and
 `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
 - an optional directive `reason` field;
-- a cancelled worker can linger on HTTP after a fast disable/re-enable.
+- a cancelled worker can linger on HTTP after a fast disable/re-enable;
+- the planner's `_schedule_planner_cycle_report` and `_PlannerLogHandler` call
+  `root.after` from the scheduler thread, which can block that thread while the
+  Tk thread is busy or closing; the Recording panel (v0.5 task 5) uses a
+  `SimpleQueue` drained by `_poll_preview` instead, and the planner could too.
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
