@@ -1,9 +1,40 @@
-# Personal Game AI v0.6.0
+# Personal Game AI v0.7.0
 
-Current release: **v0.6 — Game Profiles + Skills**. See `CHANGELOG.md` for the
+Current release: **v0.7 — Closed-loop planner**. See `CHANGELOG.md` for the
 full history and `docs/ARCHITECTURE.md` for the runtime design.
 
-## v0.6 at a glance
+## v0.7 at a glance
+
+- **The planner picks skills.** The local Ollama model can now propose running
+  one skill from the loaded profile. It names the skill and gives a reason;
+  the key, the click position and the hold time always come from the profile.
+- **Goal:** type what you want in the **Goal** field of the Planner panel.
+  Each prompt includes the goal, the game state, the enabled skills, the rules
+  and the results of the last 5 steps, so the model sees what its earlier
+  steps did.
+- **Approve each step** (the default): a proposal appears with its reason and
+  a countdown. Nothing is sent until you press **Approve**. **Reject** drops
+  it, and an unanswered proposal expires after 10 s.
+- **Auto mode** (opt-in): proposals run without a click.
+  - It needs input control on and a confirmation, and it is never saved.
+  - Steps only go to the window you confirmed it for.
+  - It turns itself off after `auto_max_steps` steps (default 20, at most
+    100), after 3 failed or blocked steps in a row, and on F8, input off,
+    profile load, Clear Rules or planner off.
+- One step at a time: while a proposal is waiting or a skill is running, the
+  planner does not call the model.
+- F8 still stops everything. It also drops the waiting proposal and returns
+  to approve mode.
+- The profile's `planner` block stores `goal` and `auto_max_steps`. Load fills
+  the Goal field, and Save writes both.
+
+To try it on Notepad:
+1. Load `profiles/example`, enter a goal, and tick `type_x` in the Skills
+   panel.
+2. Turn input control and the planner on.
+3. Approve a proposal and watch Notepad get an "x".
+
+## v0.6 profiles and skills
 
 - **Profiles:** a game profile is a folder, `profiles/<name>/`, holding a
   `profile.json` and its template images. The file lists detectors, skills,
@@ -46,7 +77,9 @@ Example `profile.json`:
   ],
   "rules": [{"name": "auto_ok", "detector": "ok_button", "skill": "press_ok",
              "min_confidence": 0.9, "cooldown_seconds": 1.0, "enabled": true}],
-  "planner": {"enabled": false, "model": "qwen3.5:9b", "interval_seconds": 5.0}
+  "planner": {"enabled": false, "model": "qwen3.5:9b", "interval_seconds": 5.0,
+              "goal": "Type an x whenever the status bar is visible.",
+              "auto_max_steps": 20}
 }
 ```
 
@@ -86,9 +119,10 @@ pauses, and `q` quits. The tools never delete anything.
   `GameState` → deterministic `RuleEngine` → gated `ActionDispatcher` → input.
   Input control starts disabled; F8 is a global emergency stop.
 - **v0.4 planner** (optional, off by default): a local Ollama model
-  (default `qwen3.5:9b`) looks at the game state every few seconds and may only
-  enable/disable named rules or do nothing. It can never press keys or click;
-  if Ollama is missing, slow, or returns nonsense, rules stay as they were.
+  (default `qwen3.5:9b`) looks at the game state every few seconds and may
+  enable/disable named rules or do nothing. Since v0.7 it may also propose a
+  skill by name (see above), but it never sends keys or clicks itself.
+  If Ollama is missing, slow, or returns nonsense, nothing changes.
   Enable it from the **Planner (Ollama)** panel; the panel shows the last
   cycle's time, latency, status and outcome.
 
@@ -167,6 +201,5 @@ or protected-process evasion.
 
 ## Next milestone
 
-See `docs/ROADMAP.md`. Next is v0.7, a closed-loop planner. The local LLM picks
-a skill *name* from the loaded profile, and every step needs your approval
-unless you explicitly switch on auto mode.
+See `docs/ROADMAP.md`. Next is v0.8, session memory: a structured log of each
+session plus short notes written by the LLM, which you can read and edit.

@@ -212,6 +212,67 @@ F8 order: turn input control off (which releases held keys), cancel the
 executor, stop the planner, then stop recording. The F8 listener does the first
 two directly on the hotkey thread, so a hold ends even while Tk is busy.
 
+## v0.7 closed-loop planner
+
+```text
+goal + GameState + enabled skills + rules + StepHistory (last 5 steps)
+   ↓  planner thread (skipped while should_plan() is False)
+OllamaClient → parse_directive → run_skill {skill, reason}   (name only)
+   ↓  post, via the cancellable sink of this planner generation
+ProposalMailbox (single slot)
+   ↓  Tk thread, _poll_preview
+Autopilot: approve mode → wait for Approve / Reject / 10 s expiry
+           auto mode    → execute until a stop condition
+   ↓  re-checks, then SkillBook.build_intent from fresh state
+SkillExecutor → ActionDispatcher (unchanged gates) → InputController
+   ↓  result drained on the Tk thread
+StepHistory (decision + outcome) → next prompt
+```
+
+- `agent/llm_planner_schema.py`: `run_skill` has exactly `type`, `skill` and
+  `reason`. The skill must be one of the enabled skills of the loaded profile,
+  and the reason is display and prompt text only.
+- `agent/proposal_mailbox.py`: `SkillProposal` and the thread-safe
+  single-slot `ProposalMailbox`. The slot stays occupied until the Tk thread
+  resolves the proposal: rejected, expired, refused, or the skill's result
+  drained.
+- `agent/autopilot.py`: the `Autopilot` state machine, used on the Tk thread
+  only.
+  - The mode is approve or auto, and it is never persisted.
+  - Auto is armed with a step budget (`auto_max_steps`, hard cap 100).
+  - `record_result` turns auto off after 3 failed steps in a row.
+- `agent/step_history.py`: `StepHistory`, a bounded, thread-safe ring of the
+  last steps, rendered into the prompt.
+- `agent/planner_scheduler.py`: the `should_plan` gate. `main.py` returns
+  False while the mailbox is occupied or the executor is busy, so no Ollama
+  request is made then.
+- `agent/planner_controller.py`: each `start()` is a new generation with its
+  own cancellable proposal sink. After `stop()`, a post raises
+  `PlannerCancelledError`, and the Tk thread drops proposals from an older
+  generation.
+
+Before a planner step runs, the Tk thread re-checks that:
+- input control is on;
+- the skill still exists and is enabled;
+- the proposal is younger than the TTL and from the current generation;
+- the executor is idle;
+- `build_intent` succeeds (a click needs a fresh, confident detection).
+
+A step that fails a re-check is recorded as refused and sends nothing.
+
+Auto mode needs input control on and a confirmation dialog, and it is checked
+again after the dialog closes. It is pinned to the window that was confirmed:
+if the target moves to another window, the step is refused and auto turns
+off. Auto steps never move the focus, and click skills
+in auto mode also need that window in the foreground. Auto turns off at the
+step cap, after 3 failures in a row, and on F8, input off, profile load, Clear
+Rules or planner off.
+
+Planner reports and log lines go through a `SimpleQueue` drained in
+`_poll_preview`; the scheduler thread never touches Tk. F8 drops the pending
+proposal and turns auto off as part of stopping the planner, after input is
+released and the executor is cancelled.
+
 ## Why the LLM is not in the fast loop
 
 The local LLM sits above the deterministic rule layer. It can choose goals or

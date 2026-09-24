@@ -204,7 +204,7 @@ Every other shape is still rejected.
 | 4 | Profile `planner.goal` / `planner.auto_max_steps` | Done | Claude | Loader validation, save round-trip, `PlannerConfig` fields. |
 | 5 | UI Planner panel + executor + F8 wiring | Done | Claude, safety-reviewer | Tk tests like `tests/test_main_skills_panel.py`: approve runs through the executor, reject/expire release the mailbox, auto needs input on and a confirmation, the auto-off triggers, F8 order, stale generation dropped, planner reports via queue. safety-reviewer PASS WITH NOTES; fixed: auto re-checked after its confirmation (F8 meanwhile wins), auto pinned to the confirmed window, auto click skills need the foreground, proposals older than the TTL dropped, the generation re-checked per step. |
 | 6 | Live Windows smoke test | Done | Claude | Passed 2026-09-25 on Notepad with Ollama `qwen3.5:9b`, all 9 criteria; results below. No app bug found. |
-| R | Release close-out (v0.7.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #61. |
+| R | Release close-out (v0.7.0) | Done (2026-09-25) | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "0.7.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit** (PR #63), which closes Issue #61. |
 
 Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
 - Each task lands through a `claude/…` or `codex/…` sub-branch PR into
