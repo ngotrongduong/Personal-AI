@@ -11,8 +11,9 @@ file and `docs/PLAN.md` in the same push as the work.
 
 1. Read `AGENTS.md`, this file, and `docs/PLAN.md`.
 2. `git fetch --all` and check open branches/PRs before starting anything.
-3. Run `scripts/test.ps1` locally before trusting any check; CI is blocked by
-   GitHub account billing/spending-limit state.
+3. Check the GitHub Actions CI result on the PR (Windows runner: compile,
+   ruff, pytest). Also run `scripts/test.ps1` locally for anything touching
+   live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
 ## Right now (2026-09-24)
@@ -20,12 +21,14 @@ file and `docs/PLAN.md` in the same push as the work.
 **v0.5 ("Demonstration recording", Issue #41) has started.** Integration
 branch: `feature/v0.5-demo-recording` (branched from `main` at the v0.4.0
 release). Task 0 (kickoff: issue, branch, `docs/PLAN.md`, `AGENTS.md`,
-`recordings/` gitignored, draft PR feature→`main`) is done. Next: tasks 1-3
+`recordings/` gitignored, draft PR feature→`main`) is done. Tasks 1-3
 (`recording/schema.py`, `recording/session_writer.py`,
-`recording/input_recorder.py`), delegated to Codex — see `docs/PLAN.md` for
-the design constraint (recording only listens, never sends input, is mutually
-exclusive with autonomous input control, and records input only while the game
-window is foreground).
+`recording/input_recorder.py`) were implemented by Claude on
+`claude/v0.5-recording-core` because Codex hit its usage limit (reset
+2026-09-25 13:55); 185/185 tests pass. See `docs/PLAN.md` for the design
+constraint (recording only listens, never sends input, is mutually exclusive
+with autonomous input control, and records input only while the game window is
+foreground).
 
 **v0.4.0 ("Local AI Planner", Issue #15) is released: merged into `main`**
 via PR #16 (merge commit `5b24233`). Issue #15 is closed, and
@@ -242,11 +245,20 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.5 tasks 1-3 (Issue #41, `docs/PLAN.md`): `recording/schema.py`,
-`recording/session_writer.py`, `recording/input_recorder.py`. They are
-independent pure-logic modules with injected fakes, so they are Codex's lane;
-PR each into `feature/v0.5-demo-recording`. Then task 4 (controller), 5 (UI),
-6 (review/export), 7 (Claude live smoke), R (release). Ollama and
+v0.5 task 4 (Issue #41, `docs/PLAN.md`): `recording/recorder_controller.py`
+wiring `InputRecorder` + `SessionWriter` (tasks 1-3 are done). Note for task
+4/6: frames come from the sampler thread and input from pynput threads, so
+`events.jsonl` lines are in enqueue order and `t` may step back by a few
+milliseconds between the two sources — `validate` should check per-source
+monotonicity (or sort by `t`) rather than strict global order. Safety-review
+notes to carry into task 4: construct `SessionWriter` (mkdir + first
+`session.json`) off the Tk thread; copy each frame before `write_frame` unless
+`capture.latest_frame()` is confirmed to return a fresh array; the
+`InputRecorder` sink must never block; check DPI scaling on the live smoke
+(the repo never calls `SetProcessDpiAwareness`, so hook coordinates vs
+`client_region()` may disagree at 125-150% scale); injected input (Steam Input,
+on-screen keyboard, remote desktop) is intentionally not recorded. Then task 5
+(UI), 6 (review/export), 7 (Claude live smoke), R (release). Ollama and
 `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
 Open v0.4 follow-ups (not blocking; could become small issues):
@@ -255,18 +267,19 @@ Open v0.4 follow-ups (not blocking; could become small issues):
 
 Re-check GitHub before starting new work because this file is a snapshot.
 
-### Known blocker
+### CI status
 
-GitHub Actions cannot start because of the repo owner's current account
-billing/spending-limit state. This is unrelated to repository code. Until billing
-is restored, the merge gate is local verification:
+Resolved 2026-09-24: the repository is now **public**, so GitHub Actions runs
+again (it had been blocked by the owner's account billing/spending-limit
+state). `.github/workflows/ci.yml` runs compile + ruff + pytest on
+`windows-latest` / Python 3.14 for pushes and PRs on `main` and `feature/**`;
+runs #106-#110 (main, the v0.5 branch, PRs #42/#43) all passed.
 
-- compile check
-- Ruff
-- pytest
-- Windows smoke test when the task touches live GUI/capture/input behavior
-
-Record that local verification explicitly in each PR.
+Merge gate: green CI on the PR, plus a Windows smoke test when the task
+touches live GUI/capture/input behavior (CI has no real desktop/game window).
+Because the repo is public, never commit recordings, screenshots, templates,
+logs, secrets, or other user data (`.gitignore` covers `recordings/`,
+`snapshots/`, `templates/`, `logs/`).
 
 ### Open issue
 
