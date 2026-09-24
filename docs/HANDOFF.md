@@ -27,7 +27,11 @@ release). Task 0 (kickoff: issue, branch, `docs/PLAN.md`, `AGENTS.md`,
 PR #44 because Codex hit its usage limit (reset 2026-09-25 13:55). Task 4
 (`recording/recorder_controller.py`, `RecordingController`) was also done by
 Claude and merged via PR #45. Task 5 (the `main.py` "Recording" panel) was done
-by Claude on `claude/v0.5-recording-panel`; 223/223 tests pass. See `docs/PLAN.md` for the design
+by Claude and merged via PR #46. Task 6 (`recording/dataset.py`,
+`recording/review.py`, `scripts/recordings.py`: `list` / `validate` / `export` /
+`review`) was done by Claude on `claude/v0.5-recordings-cli` (safety-reviewed
+PASS WITH NOTES, all fixed); 267 tests pass, 1 skipped (a symlink test that
+needs Windows Developer Mode). See `docs/PLAN.md` for the design
 constraint (recording only listens, never sends input, is mutually exclusive
 with autonomous input control, and records input only while the game window is
 foreground).
@@ -247,19 +251,14 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.5 task 6 (Issue #41, `docs/PLAN.md`): `recording/dataset.py` +
-`scripts/recordings.py` (`list` / `validate` / `export` / `review`). Tasks 1-5
-are done: the `main.py` "Recording" panel (task 5) drives `RecordingController`
-and writes sessions to `recordings/<stamp>/`. A real session for testing the CLI
-can be made by capturing any harmless window (e.g. Notepad) and pressing Record;
-never commit it (the repo is public).
+v0.5 task 7 (Issue #41, `docs/PLAN.md`): the Claude live smoke on Windows.
+Tasks 1-6 are done: the `main.py` "Recording" panel (task 5) drives
+`RecordingController` and writes sessions to `recordings/<stamp>/`, and
+`python scripts/recordings.py list|validate|export|review` (task 6) inspects
+them. Never commit a recording (the repo is public).
 
-Notes for task 6: frames come from the sampler thread and input from pynput
-threads, so `events.jsonl` lines are in enqueue order and `t` may step back by
-a few milliseconds between the two sources — `validate` should check
-per-source monotonicity (or sort by `t`) rather than strict global order.
-`ObservationRecord.observed_t` may be negative (observation older than `t0`).
-For task 7: check DPI scaling on the live smoke (the repo never calls
+For task 7: record ~1 minute on Notepad or an offline game, then run
+`validate`, `export` and `review` on it. Check DPI scaling (the repo never calls
 `SetProcessDpiAwareness`, so hook coordinates vs `client_region()` may
 disagree at 125-150% scale); injected input (Steam Input, on-screen keyboard,
 remote desktop) is intentionally not recorded; confirm the captured hwnd is the
