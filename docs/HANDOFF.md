@@ -18,8 +18,17 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-24)
 
-**v0.5 ("Demonstration recording", Issue #41) has started.** Integration
-branch: `feature/v0.5-demo-recording` (branched from `main` at the v0.4.0
+**v0.5.0 ("Demonstration recording", Issue #41) is released.** The release
+close-out (task R) bumped `APP_VERSION` and the script banners to 0.5.0 and
+updated `CHANGELOG.md`, `README.md`, `docs/ROADMAP.md` and
+`docs/ARCHITECTURE.md`. `feature/v0.5-demo-recording` was then merged into
+`main` via PR #43 as a merge commit, which closes Issue #41. **No milestone
+after v0.5 has been chosen yet**; see `docs/ROADMAP.md` ("Next — to be
+decided"). Ask the user before starting one.
+
+### v0.5 history (for reference)
+
+Integration branch: `feature/v0.5-demo-recording` (branched from `main` at the v0.4.0
 release). Task 0 (kickoff: issue, branch, `docs/PLAN.md`, `AGENTS.md`,
 `recordings/` gitignored, draft PR feature→`main`) is done. Tasks 1-3
 (`recording/schema.py`, `recording/session_writer.py`,
@@ -255,18 +264,14 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.5 task R (Issue #41, `docs/PLAN.md`): release close-out for v0.5.0. That
-means `CHANGELOG.md`, `docs/ROADMAP.md` (move v0.5 to Completed),
-`docs/ARCHITECTURE.md` (the recording layer), `README.md`,
-`APP_VERSION = "0.5.0"` (the window title still says v0.4.0), script banners, and
-then merge PR #43 feature→`main` as a **merge commit**, which closes #41.
-Tasks 0-7 are done. Never commit a recording (the repo is public).
+None is scheduled. v0.5.0 is released, and the next milestone is still to be
+decided with the user. The candidates are offline imitation-learning
+experiments on recorded datasets, or the v1.0 agent loop (`docs/ROADMAP.md`).
+Never commit a recording (the repo is public).
 
-Open v0.5 follow-ups (not blocking):
-- per-monitor DPI awareness is set implicitly by importing `dxcam`, and a
-  deliberate `SetProcessDpiAwareness(2)` at startup would make this robust;
-- injected input (Steam Input, on-screen keyboard, remote desktop, automation
-  tools) is intentionally not recorded, and the README should say so.
+Open v0.5 follow-up (not blocking): per-monitor DPI awareness is currently set
+implicitly by importing `dxcam`. Calling `SetProcessDpiAwareness(2)` explicitly
+at startup would make this robust.
 
 Ollama and `qwen3.5:9b` are installed locally (v0.4, not needed for v0.5).
 
@@ -296,8 +301,8 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-Issue #41 (v0.5 demonstration recording) — the active milestone. Issue #15
-(v0.4), Issue #1 (v0.3) and Issue #4 are all completed/closed.
+None. Issue #41 (v0.5), Issue #15 (v0.4), Issue #1 (v0.3) and Issue #4 are all
+completed and closed.
 
 ## Lessons
 
