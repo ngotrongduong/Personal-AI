@@ -11,11 +11,12 @@ writes files; it never sends input.
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 import json
 import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
+from types import MappingProxyType
 from typing import Any
 
 import cv2
@@ -25,6 +26,7 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 
 from .planner_config import PlannerConfig, load_planner_config
 from .rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
+from .skill_effects import Expectation, ExpectationError, parse_expectation
 from .skills import (
     ClickSkill,
     HoldSkill,
@@ -48,10 +50,16 @@ _PERMISSION_FIELDS = {"allowed_keys", "max_hold_seconds", "max_actions_per_secon
 _DETECTOR_FIELDS = {"name", "template", "threshold", "roi"}
 _SKILL_FIELDS = {
     ClickSkill.TYPE: {
-        "name", "type", "detector", "min_confidence", "max_observation_age_seconds", "enabled"
+        "name",
+        "type",
+        "detector",
+        "min_confidence",
+        "max_observation_age_seconds",
+        "enabled",
+        "expect",
     },
-    PressSkill.TYPE: {"name", "type", "key", "enabled"},
-    HoldSkill.TYPE: {"name", "type", "key", "seconds", "enabled"},
+    PressSkill.TYPE: {"name", "type", "key", "enabled", "expect"},
+    HoldSkill.TYPE: {"name", "type", "key", "seconds", "enabled", "expect"},
 }
 _RULE_FIELDS = {
     "name",
@@ -98,6 +106,11 @@ class GameProfile:
     skills: tuple[Skill, ...]
     rules: tuple[RuleDefinition, ...]
     planner: PlannerConfig
+    # Skill name -> observed effect it should have (v1.0). Observation only:
+    # nothing on the input path reads it.
+    expectations: Mapping[str, Expectation] = field(
+        default_factory=lambda: MappingProxyType({})
+    )
 
     def skill_book(self) -> SkillBook:
         """A fresh `SkillBook`; skills start with their profile `enabled` flag."""
@@ -166,7 +179,9 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
     permissions = _parse_permissions(top.get("permissions", {}))
     detectors = _parse_detectors(_require_list(top.get("detectors", []), "detectors"), folder)
     detector_names = {detector.name for detector in detectors}
-    skills = _parse_skills(_require_list(top.get("skills", []), "skills"), detector_names)
+    skills, expectations = _parse_skills(
+        _require_list(top.get("skills", []), "skills"), detector_names
+    )
     try:
         SkillBook(skills, permissions)
     except SkillError as error:
@@ -189,6 +204,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
         skills=skills,
         rules=rules,
         planner=planner,
+        expectations=MappingProxyType(expectations),
     )
 
 
@@ -266,8 +282,13 @@ def _parse_roi(value: object, label: str) -> tuple[int, int, int, int] | None:
     return (x, y, width, height)
 
 
-def _parse_skills(items: list[object], detector_names: set[str]) -> tuple[Skill, ...]:
+def _parse_skills(
+    items: list[object], detector_names: set[str]
+) -> tuple[tuple[Skill, ...], dict[str, Expectation]]:
+    """The skills, plus each skill's optional `expect` parsed separately."""
+
     skills: list[Skill] = []
+    expectations: dict[str, Expectation] = {}
     seen: set[str] = set()
     for index, item in enumerate(items):
         label = f"skills[{index}]"
@@ -283,7 +304,12 @@ def _parse_skills(items: list[object], detector_names: set[str]) -> tuple[Skill,
             raise ProfileError(f"Duplicate skill name: {name}")
         seen.add(name)
 
-        options = {field: block[field] for field in block if field != "type"}
+        if "expect" in block:
+            try:
+                expectations[name] = parse_expectation(block["expect"], detector_names)
+            except ExpectationError as error:
+                raise ProfileError(f"Skill {name!r}: {error}") from error
+        options = {key: block[key] for key in block if key not in ("type", "expect")}
         if skill_type == ClickSkill.TYPE:
             detector = block.get("detector")
             if not isinstance(detector, str) or detector not in detector_names:
@@ -296,7 +322,7 @@ def _parse_skills(items: list[object], detector_names: set[str]) -> tuple[Skill,
             raise ProfileError(f"Skill {name!r}: {error}") from error
         except SkillError as error:
             raise ProfileError(str(error)) from error
-    return tuple(skills)
+    return tuple(skills), expectations
 
 
 _SKILL_CLASSES: dict[str, type] = {
@@ -405,14 +431,17 @@ def save_profile(
     rules: Iterable[RuleDefinition] = (),
     permissions: SkillPermissions | None = None,
     planner: PlannerConfig | None = None,
+    expectations: Mapping[str, Expectation] | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Write a new profile folder under `root` and return its path.
 
     Each detector's template array is written to `templates/<detector>.png`
-    (its `template` field is replaced by that path). An existing profile
-    folder is only written into when `overwrite` is True; files are replaced,
-    never deleted. Everything is validated before the first file is written.
+    (its `template` field is replaced by that path). `expectations` (skill
+    name -> `Expectation`) is written as those skills' `expect` blocks. An
+    existing profile folder is only written into when `overwrite` is True;
+    files are replaced, never deleted. Everything is validated before the
+    first file is written.
     """
 
     if not isinstance(name, str) or not name.strip():
@@ -446,7 +475,7 @@ def save_profile(
             "max_actions_per_second": permissions.max_actions_per_second,
         },
         "detectors": detector_blocks,
-        "skills": [_skill_block(skill) for skill in skills],
+        "skills": [_skill_block(skill, expectations) for skill in skills],
         "rules": [_rule_block(definition) for definition in rules],
         "planner": _planner_block(planner if planner is not None else PlannerConfig()),
     }
@@ -491,7 +520,7 @@ def _validate_before_write(data: dict[str, object], detector_blocks: list[dict])
     if len(set(names)) != len(names):
         raise ProfileError("Duplicate detector names.")
     permissions = _parse_permissions(data["permissions"])
-    skills = _parse_skills(list(data["skills"]), set(names))  # type: ignore[arg-type]
+    skills, _ = _parse_skills(list(data["skills"]), set(names))  # type: ignore[arg-type]
     try:
         SkillBook(skills, permissions)
     except SkillError as error:
@@ -512,9 +541,12 @@ def _encode_png(template_bgr: np.ndarray, name: str) -> bytes:
     return encoded.tobytes()
 
 
-def _skill_block(skill: Skill) -> dict[str, object]:
+def _skill_block(
+    skill: Skill, expectations: Mapping[str, Expectation] | None = None
+) -> dict[str, object]:
+    block: dict[str, object]
     if isinstance(skill, ClickSkill):
-        return {
+        block = {
             "name": skill.name,
             "type": skill.TYPE,
             "detector": skill.detector,
@@ -522,17 +554,22 @@ def _skill_block(skill: Skill) -> dict[str, object]:
             "max_observation_age_seconds": skill.max_observation_age_seconds,
             "enabled": skill.enabled,
         }
-    if isinstance(skill, PressSkill):
-        return {"name": skill.name, "type": skill.TYPE, "key": skill.key, "enabled": skill.enabled}
-    if isinstance(skill, HoldSkill):
-        return {
+    elif isinstance(skill, PressSkill):
+        block = {"name": skill.name, "type": skill.TYPE, "key": skill.key, "enabled": skill.enabled}
+    elif isinstance(skill, HoldSkill):
+        block = {
             "name": skill.name,
             "type": skill.TYPE,
             "key": skill.key,
             "seconds": skill.seconds,
             "enabled": skill.enabled,
         }
-    raise ProfileError(f"Unsupported skill {skill!r}.")
+    else:
+        raise ProfileError(f"Unsupported skill {skill!r}.")
+    expectation = (expectations or {}).get(skill.name)
+    if expectation is not None:
+        block["expect"] = expectation.to_block()
+    return block
 
 
 def _rule_block(definition: RuleDefinition) -> dict[str, object]:
