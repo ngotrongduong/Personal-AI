@@ -30,7 +30,12 @@ Task 0 (kickoff) is done:
 Task 1 (`agent/skill_effects.py`: `Expectation`, `parse_expectation`,
 `EffectWatch`; the profile's optional per-skill `expect`, parsed into
 `GameProfile.expectations` and written back by `save_profile`; the
-observation import-boundary test) is done on `claude/v1.0-skill-effects`.
+observation import-boundary test) merged via PR #85.
+
+Task 2 (`agent/agent_session.py`: preflight checks, `RunBudget`,
+`GoalCondition`, `AgentRun`; planner `max_run_minutes` / `stop_when`;
+`OllamaClient.check_model()` via `GET /api/tags`) is done on
+`claude/v1.0-agent-session`.
 
 v1.0 adds observed effects (a skill's optional `expect`, recorded as
 `confirmed` / `not_seen` after each step), agent runs (an Agent panel with
@@ -433,9 +438,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.0 task 2: `agent/agent_session.py` (preflight, run budget, goal
-condition), planner `max_run_minutes` / `stop_when` and
-`OllamaClient.check_model` (see `docs/PLAN.md`), on a `claude/v1.0-…` branch
+v1.0 task 3: loop integration — `StepRecord.effect` and the prompt line,
+the session-log `effect` record, autopilot counting `not_seen`, the
+`should_plan` gate while a watch is pending, and the effect watch in
+`main.py`'s `_poll_preview` (see `docs/PLAN.md`), on a `claude/v1.0-…` branch
 with a PR into `feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55, so
 pure-logic tasks can go to Codex again after that.
 

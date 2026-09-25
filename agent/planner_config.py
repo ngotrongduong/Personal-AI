@@ -5,6 +5,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Mapping
 
+from .agent_session import (
+    DEFAULT_MAX_RUN_MINUTES,
+    GoalCondition,
+    parse_goal_condition,
+    validate_max_run_minutes,
+)
 from .autopilot import DEFAULT_AUTO_MAX_STEPS, validate_auto_max_steps
 from .llm_planner import MAX_GOAL_LENGTH
 from .ollama_client import OllamaClientConfig
@@ -19,6 +25,8 @@ class PlannerConfig:
     mode; auto mode itself is never stored.
     ``llm_notes`` lets the planner add notes for later sessions (v0.8); off
     by default. Notes are prompt hints only and never widen permissions.
+    ``max_run_minutes`` bounds every planner session (v1.0, cap 120) and
+    ``stop_when`` optionally ends it when a detector is seen.
     """
 
     enabled: bool = False
@@ -27,8 +35,13 @@ class PlannerConfig:
     goal: str = ""
     auto_max_steps: int = DEFAULT_AUTO_MAX_STEPS
     llm_notes: bool = False
+    max_run_minutes: float = DEFAULT_MAX_RUN_MINUTES
+    stop_when: GoalCondition | None = None
 
     def __post_init__(self) -> None:
+        validate_max_run_minutes(self.max_run_minutes)
+        if self.stop_when is not None and not isinstance(self.stop_when, GoalCondition):
+            raise ValueError("stop_when must be a GoalCondition.")
         if not isinstance(self.llm_notes, bool):
             raise ValueError("llm_notes must be a boolean.")
         if not isinstance(self.goal, str):
@@ -66,6 +79,8 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         "goal",
         "auto_max_steps",
         "llm_notes",
+        "max_run_minutes",
+        "stop_when",
     }
     unknown_fields = set(planner) - recognized_fields
     if unknown_fields:
@@ -84,6 +99,7 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         raise ValueError("Planner Ollama settings require a 'model'.")
 
     ollama = OllamaClientConfig(**client_options) if client_options else None
+    stop_when = parse_goal_condition(planner["stop_when"]) if "stop_when" in planner else None
     return PlannerConfig(
         enabled=enabled,
         ollama=ollama,
@@ -91,4 +107,6 @@ def load_planner_config(profile: Mapping[str, object]) -> PlannerConfig:
         goal=planner.get("goal", ""),
         auto_max_steps=planner.get("auto_max_steps", DEFAULT_AUTO_MAX_STEPS),
         llm_notes=planner.get("llm_notes", False),
+        max_run_minutes=planner.get("max_run_minutes", DEFAULT_MAX_RUN_MINUTES),
+        stop_when=stop_when,
     )

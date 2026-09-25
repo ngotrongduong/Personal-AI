@@ -24,6 +24,7 @@ import numpy as np
 
 from vision.detector_registry import DetectorRegistry, DetectorSpec
 
+from .agent_session import check_goal_detector
 from .planner_config import PlannerConfig, load_planner_config
 from .rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
 from .skill_effects import Expectation, ExpectationError, parse_expectation
@@ -193,6 +194,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
     )
     try:
         planner = load_planner_config(top)
+        check_goal_detector(planner.stop_when, detector_names)
     except (TypeError, ValueError) as error:
         raise ProfileError(f"Invalid planner block: {error}") from error
 
@@ -530,6 +532,10 @@ def _validate_before_write(data: dict[str, object], detector_blocks: list[dict])
         set(names),
         {skill.name for skill in skills},
     )
+    try:
+        check_goal_detector(load_planner_config(data).stop_when, set(names))
+    except (TypeError, ValueError) as error:
+        raise ProfileError(f"Invalid planner block: {error}") from error
 
 
 def _encode_png(template_bgr: np.ndarray, name: str) -> bytes:
@@ -594,7 +600,10 @@ def _planner_block(planner: PlannerConfig) -> dict[str, object]:
         "goal": planner.goal,
         "auto_max_steps": planner.auto_max_steps,
         "llm_notes": planner.llm_notes,
+        "max_run_minutes": planner.max_run_minutes,
     }
+    if planner.stop_when is not None:
+        block["stop_when"] = planner.stop_when.to_block()
     if planner.ollama is not None:
         block.update(
             model=planner.ollama.model,
