@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: `feature/v1.0-personal-agent` (Issue #82). v0.8 (`feature/v0.8-session-memory`, Issue #71) merged into `main` as a merge commit at release.
+- Active integration branch: none. v1.0 (`feature/v1.0-personal-agent`, Issue #82) merged into `main` as a merge commit at release. The next milestone gets a new `feature/<milestone>` branch.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,8 +94,8 @@ feature/<milestone>
 
 ## Current priority
 
-v1.0 "Personal Game Agent" (Issue #82) on `feature/v1.0-personal-agent`.
-It closes the loop vision → state → plan → action → observation:
+v1.0 "Personal Game Agent" (Issue #82) is released on `main`. It closes the
+loop vision → state → plan → action → observation:
 - observed effects: a skill's optional `expect`, recorded as `confirmed` /
   `not_seen` after each step;
 - agent runs: Preflight / Start Agent / Stop Agent, a run budget and an
@@ -103,8 +103,9 @@ It closes the loop vision → state → plan → action → observation:
 - a user guide.
 
 Earlier steps: v0.6 profiles + skills, v0.7 a planner that picks skills, v0.8
-session memory (all released). See `docs/PLAN.md`'s design constraint before
-implementing anything.
+session memory (all released). No milestone after v1.0 is planned yet; see
+`docs/ROADMAP.md` for candidates. Scope a new milestone in `docs/PLAN.md`
+before implementing anything.
 
 The invariants below stay in force for every later milestone.
 

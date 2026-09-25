@@ -18,9 +18,15 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
-**v1.0 "Personal Game Agent" (Issue #82) is in progress** on
-`feature/v1.0-personal-agent`, branched from `main` at the v0.8.0 release.
-Task 0 (kickoff) is done:
+**v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
+branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge
+commit, which closed Issue #82. `main` has `APP_VERSION = "1.0.0"`. No
+milestone after v1.0 is planned yet (see `docs/ROADMAP.md` "Next").
+
+### v1.0 history (for reference)
+
+Built on `feature/v1.0-personal-agent`, branched from `main` at the v0.8.0
+release. Task 0 (kickoff) is done:
 - Issue #82;
 - the branch;
 - the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
@@ -65,6 +71,15 @@ acceptance criteria on 2026-09-25 (58/58 checks; details in `docs/PLAN.md`
 It also fixed `docs/USER_GUIDE.md`: a goal already on screen ends a new run
 at once. When the GPU is shared with a game, Ollama calls can pass the 30 s
 default timeout; the profile's `planner.timeout_seconds` raises it.
+
+Task 6's results landed via PR #90. Task R (release close-out: CHANGELOG,
+README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.0.0"`, the
+`setup.ps1` / `check_system.ps1` banners) followed, then PR #84 closed Issue
+#82.
+
+Local leftover branches are safe for the user to delete (Claude avoids
+`git branch -D`): `claude/v1.0-*` task branches, plus the older ones listed
+below.
 
 v1.0 adds observed effects (a skill's optional `expect`, recorded as
 `confirmed` / `not_seen` after each step), agent runs (an Agent panel with
@@ -467,10 +482,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.0 task R, the release close-out:
-- CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS;
-- `APP_VERSION = "1.0.0"` and the `setup.ps1` / `check_system.ps1` banners.
-Then merge PR #84 (feature→`main`) as a merge commit, which closes Issue #82.
+None scheduled. v1.0 is released. The next milestone needs scoping first:
+open an issue, create a `feature/<milestone>` branch from `main`, and write
+its spec with a design constraint and acceptance criteria in
+`docs/PLAN.md`. Candidates are in `docs/ROADMAP.md` "Next".
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -506,7 +521,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-Issue #82 (v1.0 Personal Game Agent) is open. Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+None. Issue #82 (v1.0), Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons
