@@ -38,8 +38,14 @@ Task 2 (`agent/agent_session.py`: preflight checks, `RunBudget`,
 
 Task 3 (loop integration: `StepRecord.effect`, the prompt's effect text,
 the session-log `effect` record, the effect watch in `main.py`, the planner
-gate and autopilot counting `not_seen` as a failure) is done on
-`claude/v1.0-loop-effects`.
+gate and autopilot counting `not_seen` as a failure) merged via PR #87.
+
+Task 4 (the Agent panel in `main.py`) is done on `claude/v1.0-agent-panel`:
+- Preflight / Start Agent / Stop Agent;
+- the Ollama check runs on a worker thread;
+- every planner session is an `AgentRun`, ended by its budget or goal
+  through `_poll_agent_run`;
+- every planner stop cancels a running planner skill.
 
 v1.0 adds observed effects (a skill's optional `expect`, recorded as
 `confirmed` / `not_seen` after each step), agent runs (an Agent panel with
@@ -442,13 +448,14 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.0 task 4: the Agent panel in `main.py` — Preflight (with
-`check_model` on a worker thread), Start Agent (runs preflight, then starts
-the planner; never enables input or auto), Stop Agent, the run status line,
-and budget / goal stops that end the session with "run budget reached" /
-"goal reached" (see `docs/PLAN.md`). Work on a `claude/v1.0-…` branch with a
-PR into `feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55,
-so pure-logic tasks can go to Codex again after that.
+v1.0 task 5 has three parts:
+- `docs/USER_GUIDE.md`: a step-by-step guide from setup to an agent run on Notepad;
+- `profiles/example/profile.json`: show `expect` and `stop_when`. Keep the example-profile test passing;
+- `scripts/memory.py`: show `effect` records.
+
+Work on a `claude/v1.0-…` branch with a PR into
+`feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55, so
+pure-logic tasks can go to Codex again after that.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.

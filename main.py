@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from collections.abc import Callable
 from dataclasses import dataclass, replace
 import logging
 import math
@@ -18,6 +19,14 @@ from pynput import keyboard
 import win32gui
 
 from agent.action_dispatcher import ActionDispatcher
+from agent.agent_session import (
+    DEFAULT_MAX_RUN_MINUTES,
+    AgentRun,
+    PreflightFacts,
+    PreflightReport,
+    RunBudget,
+    run_preflight,
+)
 from agent.autopilot import (
     DEFAULT_AUTO_MAX_STEPS,
     DEFAULT_TTL_SECONDS,
@@ -40,7 +49,7 @@ from agent.notes import (
     load_notes,
     save_notes,
 )
-from agent.ollama_client import OllamaClientConfig
+from agent.ollama_client import OllamaClient, OllamaClientConfig, OllamaResult
 from agent.planner_config import PlannerConfig
 from agent.planner_controller import PlannerController
 from agent.planner_scheduler import PlannerCycleReport
@@ -94,6 +103,12 @@ SESSION_END_PLANNER_OFF = "planner disabled"
 SESSION_END_RESTART = "planner restarted"
 SESSION_END_F8 = "emergency stop"
 SESSION_END_APP_CLOSE = "app closed"
+SESSION_END_AGENT_STOP = "agent stopped"
+
+# v1.0 Agent panel.
+AGENT_IDLE_TEXT = "Agent: press Preflight to check everything a run needs."
+AGENT_NO_CHECKS_TEXT = "Checks: not run yet."
+AGENT_NO_RUN_TEXT = "Run: none. A run starts with the planner and ends with it."
 
 RECORDING_IDLE_TEXT = "Recording: off."
 RECORDING_STOP_F8 = "f8"
@@ -416,6 +431,27 @@ class PersonalGameAIApp:
         self._effect_watch: EffectWatch | None = None
         self._effect_record: StepRecord | None = None
         self._effect_pending = threading.Event()
+        # v1.0 agent runs. Every planner session is a run with a budget and an
+        # optional goal (agent_run, Tk thread only; None while no planner runs).
+        # Preflight's Ollama check runs on a worker thread and reports through
+        # _agent_queue, drained by _poll_preview. A result whose job is no
+        # longer current is ignored, and _agent_start_job (the job whose
+        # result may start the agent) is cleared by every planner stop and F8.
+        self.agent_run: AgentRun | None = None
+        self.model_checker: Callable[[OllamaClientConfig], OllamaResult] = (
+            lambda config: OllamaClient(config).check_model()
+        )
+        self._agent_queue: queue.SimpleQueue[tuple[int, OllamaClientConfig, bool, str]] = (
+            queue.SimpleQueue()
+        )
+        self._preflight_job = 0
+        self._agent_start_job: int | None = None
+        self._preflight_thread: threading.Thread | None = None
+        # Title of the captured window, for the preflight list.
+        self._capture_title: str | None = None
+        self.agent_status_var = tk.StringVar(value=AGENT_IDLE_TEXT)
+        self.agent_checks_var = tk.StringVar(value=AGENT_NO_CHECKS_TEXT)
+        self.agent_run_var = tk.StringVar(value=AGENT_NO_RUN_TEXT)
         self.planner_goal_var = tk.StringVar(value="")
         # Plain-str copy of the Goal field for the planner thread, which must
         # never read a Tk variable. Updated on the Tk thread by a trace.
@@ -653,6 +689,32 @@ class PersonalGameAIApp:
 
         ttk.Label(
             rules_box, textvariable=self.rules_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+
+        agent_box = ttk.LabelFrame(
+            outer,
+            text="Agent — a planner session with a time budget; it never turns on "
+            "input control or auto mode",
+        )
+        agent_box.pack(fill="x", pady=(0, 8))
+
+        agent_row = ttk.Frame(agent_box)
+        agent_row.pack(fill="x", padx=8, pady=(7, 4))
+        ttk.Button(
+            agent_row, text="Preflight", command=self.run_agent_preflight
+        ).pack(side="left")
+        ttk.Button(
+            agent_row, text="Start Agent", command=self.start_agent
+        ).pack(side="left", padx=(4, 0))
+        ttk.Button(
+            agent_row, text="Stop Agent", command=self.stop_agent
+        ).pack(side="left", padx=(4, 10))
+        ttk.Label(agent_row, textvariable=self.agent_status_var).pack(side="left")
+        ttk.Label(
+            agent_box, textvariable=self.agent_checks_var, wraplength=1150, justify="left"
+        ).pack(anchor="w", padx=8, pady=(0, 2))
+        ttk.Label(
+            agent_box, textvariable=self.agent_run_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
 
         planner_box = ttk.LabelFrame(outer, text="Planner (Ollama)")
@@ -909,8 +971,9 @@ class PersonalGameAIApp:
             self.stop_capture(silent=True)
             self.capture = WindowCapture(hwnd=hwnd, target_fps=30)
             self.capture.start()
+            self._capture_title = win32gui.GetWindowText(hwnd)
             self.status_var.set("CAPTURING")
-            self.log(f"Capture started: {win32gui.GetWindowText(hwnd)}")
+            self.log(f"Capture started: {self._capture_title}")
         except Exception as exc:
             messagebox.showerror("Start Capture", str(exc))
         finally:
@@ -923,6 +986,7 @@ class PersonalGameAIApp:
         if self.capture:
             self.capture.stop()
             self.capture = None
+            self._capture_title = None
             self.latest_raw_frame = None
             self.latest_match = None
             self.fps_var.set("Capture: 0.0 FPS")
@@ -1279,12 +1343,12 @@ class PersonalGameAIApp:
         self.rules_var.set("Rules: 0 active.")
         self.log("All rules cleared.")
 
-    def _stop_planner_for(self, why: str):
+    def _stop_planner_for(self, why: str, *, session_end: str | None = None):
         planner_was_running = self.planner.is_running
         self.planner.stop()
         self._reset_planner_steps(why)
         self._reset_planner_last_cycle()
-        self._close_session_log(why)
+        self._close_session_log(session_end or why)
         self.planner_enabled_var.set(False)
         self.planner_status_var.set(f"Planner: disabled because {why}.")
         if planner_was_running:
@@ -1614,11 +1678,13 @@ class PersonalGameAIApp:
                 raise ValueError("Planner interval must be a finite value of at least 1.0 seconds.")
             config = PlannerConfig(
                 enabled=True,
-                ollama=OllamaClientConfig(model=self.planner_model_var.get().strip()),
+                ollama=self._planner_client_config(),
                 interval_seconds=interval_seconds,
             )
             self._reset_planner_steps("the planner was restarted")
             self._reset_planner_last_cycle()
+            # Built before the planner starts, so a running planner always has a run.
+            run = self._new_agent_run()
             generation = self._planner_generation
             book = self.skill_book
             # Read-only notes (an invalid notes.json) are never written to.
@@ -1637,12 +1703,15 @@ class PersonalGameAIApp:
                 allow_notes=allow_notes,
                 on_note=lambda result: self._queue_planner_note(generation, result),
             )
+            self.agent_run = run
         except ValueError as exc:
             self.planner_enabled_var.set(False)
             self.planner_status_var.set("Planner: disabled.")
             messagebox.showerror("Enable LLM planner", str(exc))
             return
 
+        self.agent_status_var.set("Agent: running. Stop Agent or F8 ends the run.")
+        self._refresh_agent_run()
         self.planner_status_var.set(
             f"Planner: enabled ({config.ollama.model}, every {config.interval_seconds:g}s)."
         )
@@ -1654,7 +1723,28 @@ class PersonalGameAIApp:
                 "It can enable or disable rules and propose one enabled skill at a time; "
                 "each proposal waits for Approve unless auto mode is on."
             )
-        self.log(f"LLM planner ENABLED. {scope} Input control still gates every dispatch.")
+        goal = f", or when {run.goal.describe()}" if run.goal is not None else ""
+        self.log(
+            f"LLM planner ENABLED ({config.ollama.host}:{config.ollama.port}). {scope} "
+            f"Input control still gates every dispatch. "
+            f"The run ends after {run.budget.max_seconds / 60:g} min{goal}."
+        )
+
+    def _planner_client_config(self) -> OllamaClientConfig:
+        """Ollama settings: the Model field, with the profile's host, port and timeout."""
+        model = self.planner_model_var.get().strip()
+        profile = self.profile
+        base = profile.planner.ollama if profile is not None else None
+        if base is None:
+            return OllamaClientConfig(model=model)
+        return replace(base, model=model)
+
+    def _new_agent_run(self) -> AgentRun:
+        """The run a planner session is: the profile's time budget and goal."""
+        planner = self.profile.planner if self.profile is not None else None
+        minutes = planner.max_run_minutes if planner is not None else DEFAULT_MAX_RUN_MINUTES
+        goal = planner.stop_when if planner is not None else None
+        return AgentRun(RunBudget(minutes * 60.0, time.monotonic()), goal)
 
     def _reset_planner_last_cycle(self):
         """Invalidate pending cycle reports and clear the last-cycle label (Tk thread)."""
@@ -1702,6 +1792,173 @@ class PersonalGameAIApp:
                 source="llm",
                 text=result.text if result.stored else f"{result.text} ({result.reason})".strip(),
             )
+
+    # ---------------- Agent runs (v1.0) ----------------
+
+    def run_agent_preflight(self):
+        """Preflight button: check everything a run needs; starts nothing."""
+        self._begin_preflight(start=False)
+
+    def start_agent(self):
+        """Start Agent: run the preflight, then start the planner if it passes.
+
+        This only starts a planner session (the run). Input control and auto
+        mode stay exactly as the user set them.
+        """
+        if self.planner.is_running:
+            self.log("The agent is already running.")
+            return
+        self._begin_preflight(start=True)
+
+    def stop_agent(self):
+        """Stop Agent: end the run (the planner session), or a pending start."""
+        if self.planner.is_running:
+            run = self.agent_run
+            summary = f": {self._agent_run_summary(run)}" if run is not None else ""
+            self._stop_planner_for("the agent was stopped", session_end=SESSION_END_AGENT_STOP)
+            self.log(f"Agent stopped{summary}.")
+        elif self._agent_start_job is not None:
+            self._cancel_agent_start("you pressed Stop Agent")
+        else:
+            self.log("The agent is not running.")
+
+    def _begin_preflight(self, *, start: bool):
+        thread = self._preflight_thread
+        if thread is not None and thread.is_alive():
+            self.log("A preflight check is already running; try again when it finishes.")
+            return
+        self._preflight_job += 1
+        job = self._preflight_job
+        self._agent_start_job = job if start else None
+        try:
+            config = self._planner_client_config()
+        except ValueError:
+            # No network check without valid planner settings.
+            self._finish_preflight(job, None, False, "no planner settings")
+            return
+        self.agent_status_var.set(
+            "Agent: checking Ollama, then starting…" if start else "Agent: checking Ollama…"
+        )
+        thread = threading.Thread(
+            target=self._check_model, args=(job, config), name="agent-preflight", daemon=True
+        )
+        self._preflight_thread = thread
+        thread.start()
+
+    def _check_model(self, job: int, config: OllamaClientConfig):
+        """Preflight worker thread: the Ollama check only; the result is queued."""
+        try:
+            result = self.model_checker(config)
+            if result.error is None:
+                ok, detail = True, result.text or "available"
+            else:
+                ok, detail = False, result.error.message
+        except Exception as exc:  # a failed check must never kill the thread silently
+            ok, detail = False, f"check failed: {exc}"
+        if not self._closing:
+            self._agent_queue.put((job, config, ok, detail))
+
+    def _drain_agent_queue(self):
+        while True:
+            try:
+                job, config, ok, detail = self._agent_queue.get_nowait()
+            except queue.Empty:
+                return
+            if job == self._preflight_job:
+                self._finish_preflight(job, config, ok, detail)
+
+    def _finish_preflight(
+        self, job: int, config: OllamaClientConfig | None, ok: bool, detail: str
+    ):
+        """Show the report and, for Start Agent, start the planner if it passes.
+
+        Everything except Ollama is read now, on the Tk thread, so a start
+        uses facts that are still true after the (slow) Ollama check.
+        """
+        try:
+            current: OllamaClientConfig | None = self._planner_client_config()
+        except ValueError:
+            current = None
+        if config is not None and current != config:
+            ok, detail = False, "the planner settings changed during the check; check again"
+        report = run_preflight(self._preflight_facts(current, ok, detail))
+        self._show_preflight(report)
+        if self._agent_start_job != job:
+            return
+        self._agent_start_job = None
+        if not report.ready:
+            self.log(f"Agent not started: {report.summary()}")
+            return
+        if self.planner.is_running:
+            self.log("The agent is already running.")
+            return
+        self.planner_enabled_var.set(True)
+        self._toggle_planner()
+        if not self.planner.is_running:
+            self.log("Agent not started: the planner did not start.")
+            return
+        mode = "auto" if self.autopilot.mode == "auto" else "approve each step"
+        input_state = "on" if self.input.enabled else "off (steps are refused until you turn it on)"
+        self.log(f"Agent started. Mode: {mode}. Input control: {input_state}.")
+
+    def _preflight_facts(
+        self, config: OllamaClientConfig | None, ollama_ok: bool, ollama_detail: str
+    ) -> PreflightFacts:
+        book = self.skill_book
+        enabled = tuple(name for name in book.names if book.is_enabled(name)) if book else ()
+        return PreflightFacts(
+            profile_name=self.profile.name if self.profile is not None else None,
+            capture_running=self.capture is not None,
+            window_title=self._capture_title if self.capture is not None else None,
+            planner_configured=config is not None,
+            model=config.model if config is not None else None,
+            ollama_ok=ollama_ok,
+            ollama_detail=ollama_detail,
+            enabled_skills=enabled,
+            input_enabled=self.input.enabled,
+            goal=self.planner_goal_var.get(),
+        )
+
+    def _show_preflight(self, report: PreflightReport):
+        self.agent_checks_var.set("   ".join(check.line() for check in report.checks))
+        self.agent_status_var.set(f"Agent: {report.summary()}")
+
+    def _cancel_agent_start(self, why: str):
+        """A pending Start Agent never starts once anything stops the planner."""
+        if self._agent_start_job is None:
+            return
+        self._agent_start_job = None
+        self.agent_status_var.set(f"Agent: start cancelled because {why}.")
+        self.log(f"Agent start cancelled because {why}.")
+
+    def _poll_agent_run(self, now: float | None = None):
+        """Tk loop: end the run when its budget is spent or its goal is seen."""
+        run = self.agent_run
+        if run is None:
+            return
+        now = time.monotonic() if now is None else now
+        reason = run.stop_reason(self.game_state, now)
+        if reason is None:
+            self._refresh_agent_run(now)
+            return
+        self.log(f"Agent run ended because {reason}: {self._agent_run_summary(run)}.")
+        self._stop_planner_for(reason)
+
+    def _refresh_agent_run(self, now: float | None = None):
+        run = self.agent_run
+        if run is None:
+            text = AGENT_NO_RUN_TEXT
+        else:
+            text = f"Run: {run.status_line(time.monotonic() if now is None else now)}"
+        if self.agent_run_var.get() != text:
+            self.agent_run_var.set(text)
+
+    @staticmethod
+    def _agent_run_summary(run: AgentRun) -> str:
+        return (
+            f"{run.steps} step(s), effects {run.effects['confirmed']} confirmed / "
+            f"{run.effects['not_seen']} not seen"
+        )
 
     # ---------------- Planner steps (v0.7) ----------------
 
@@ -1827,16 +2084,27 @@ class PersonalGameAIApp:
         self._refresh_planner_panel()
 
     def _reset_planner_steps(self, why: str):
-        """Planner stopped: auto off, pending proposal and effect watch dropped, mailbox empty."""
+        """Planner stopped: auto off, a running planner skill cancelled, pending proposal
+        and effect watch dropped, mailbox empty, the agent run over and a pending
+        Start Agent cancelled."""
         self._disarm_auto(why)
+        if self._planner_intent is not None and self.executor.busy:
+            # The run is over, so its skill is too (a held key is released).
+            self.executor.cancel()
+            self.log(f"Planner skill cancelled because {why}.")
         dropped = self.autopilot.reset()
         self._drop_effect_watch(why)
         self.proposals.clear()
         self._planner_decision = None
         self._planner_intent = None
+        if self.agent_run is not None:
+            self.agent_run = None
+            self.agent_status_var.set(f"Agent: run ended because {why}.")
+        self._cancel_agent_start(why)
         if dropped is not None:
             self.log(f"Planner proposal '{dropped.skill_name}' dropped because {why}.")
         self._refresh_planner_panel()
+        self._refresh_agent_run()
 
     def _poll_planner_proposals(self):
         """Tk loop: expire a stale pending proposal, then take and offer a new one."""
@@ -1935,6 +2203,8 @@ class PersonalGameAIApp:
                 self._disarm_auto("the game window changed")
             return
         self._planner_intent = built.intent
+        if self.agent_run is not None:
+            self.agent_run.note_step()
         self._running_skill = name
         self._set_skill_result(name, "running…")
         self.log(f"Skill '{name}' started (planner, {decision}): {proposal.reason}")
@@ -2029,6 +2299,8 @@ class PersonalGameAIApp:
         self._effect_record = None
         if record is not None:
             self.step_history.set_effect(record, effect)
+        if self.agent_run is not None:
+            self.agent_run.note_effect(effect)
         self._session_write(
             "effect",
             skill=result.skill_name,
@@ -2604,6 +2876,7 @@ class PersonalGameAIApp:
         self._sync_recording_state()
         self._drain_skill_runs()
         self._drain_planner_queue()
+        self._drain_agent_queue()
         self._sync_notes()
         self._poll_planner_proposals()
 
@@ -2621,6 +2894,7 @@ class PersonalGameAIApp:
 
         # After vision, so this frame's observations count.
         self._poll_effect_watch()
+        self._poll_agent_run()
         self.root.after(33, self._poll_preview)
 
     def _draw_preview(self, frame):
