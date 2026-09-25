@@ -12,5 +12,11 @@
     {"name": "hold_space", "type": "hold", "key": "space", "seconds": 1.0, "enabled": false}
   ],
   "rules": [],
-  "planner": {"enabled": false}
+  "planner": {
+    "enabled": false,
+    "model": "qwen3.5:9b",
+    "goal": "Type one x in the Notepad window, then stop.",
+    "auto_max_steps": 3,
+    "max_run_minutes": 5
+  }
 }

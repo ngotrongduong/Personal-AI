@@ -95,8 +95,8 @@ class RecordingScheduler:
         self.stopped = True
 
 
-class MainPlannerPanelTests(unittest.TestCase):
-    """v0.7 task 5: goal, approve/reject/expire, auto mode and its off-switches."""
+class PlannerPanelTestCase(unittest.TestCase):
+    """The app with a scripted planner and a fake dispatcher; no tests of its own."""
 
     def setUp(self) -> None:
         self.root = _skip_if_no_display()
@@ -212,6 +212,10 @@ class MainPlannerPanelTests(unittest.TestCase):
 
     def _log_text(self) -> str:
         return self.app.logbox.get("1.0", "end")
+
+
+class MainPlannerPanelTests(PlannerPanelTestCase):
+    """v0.7 task 5: goal, approve/reject/expire, auto mode and its off-switches."""
 
     # ---- wiring ----
 

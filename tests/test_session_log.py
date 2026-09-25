@@ -66,6 +66,7 @@ class SessionLogWriterTests(unittest.TestCase):
             log.write("step", skill="type_x", reason="goal", decision="approved", outcome="DISPATCHED", ok=True)
         )
         self.assertTrue(log.write("step", skill="type_x", reason="r", decision="expired", outcome="", ok=None))
+        self.assertTrue(log.write("effect", skill="type_x", effect="confirmed", detector="x_glyph", waited_s=0.4))
         self.assertTrue(log.write("auto", on=True, reason="confirmed", max_steps=3))
         self.assertTrue(log.write("auto", on=False, reason="step cap", max_steps=None))
         self.assertTrue(log.write("note", action="add", source="llm", text="x works"))
@@ -74,7 +75,10 @@ class SessionLogWriterTests(unittest.TestCase):
         records = read_session(self.path)
         self.assertEqual(
             [r["type"] for r in records],
-            ["session_start", "cycle", "cycle", "step", "step", "auto", "auto", "note", "session_end"],
+            [
+                "session_start", "cycle", "cycle", "step", "step",
+                "effect", "auto", "auto", "note", "session_end",
+            ],
         )
         self.assertEqual(records[0]["t"], 0.0)
         self.assertEqual(records[1]["t"], 1.234)
@@ -108,6 +112,16 @@ class SessionLogWriterTests(unittest.TestCase):
             log.write("note", action="add", source="system", text="t")
         with self.assertRaises(ValueError):
             log.write("session_start", **{**START, "auto_max_steps": True})
+        effect = {"skill": "type_x", "effect": "confirmed", "detector": "x_glyph", "waited_s": 0.4}
+        for bad in (
+            {"effect": "pending"},
+            {"effect": "none"},
+            {"waited_s": -1.0},
+            {"waited_s": True},
+            {"detector": None},
+        ):
+            with self.assertRaises(ValueError):
+                log.write("effect", **{**effect, **bad})
         self.assertFalse(self.path.exists())
 
     def test_text_is_cleaned_and_cut(self) -> None:

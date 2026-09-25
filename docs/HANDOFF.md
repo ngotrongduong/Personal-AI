@@ -18,10 +18,79 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
+**v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
+branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge
+commit, which closed Issue #82. `main` has `APP_VERSION = "1.0.0"`. No
+milestone after v1.0 is planned yet (see `docs/ROADMAP.md` "Next").
+
+### v1.0 history (for reference)
+
+Built on `feature/v1.0-personal-agent`, branched from `main` at the v0.8.0
+release. Task 0 (kickoff) is done:
+- Issue #82;
+- the branch;
+- the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
+- the `AGENTS.md` agent invariant;
+- the draft release PR feature→`main` (PR #84), kickoff merged via PR #83.
+
+Task 1 (`agent/skill_effects.py`: `Expectation`, `parse_expectation`,
+`EffectWatch`; the profile's optional per-skill `expect`, parsed into
+`GameProfile.expectations` and written back by `save_profile`; the
+observation import-boundary test) merged via PR #85.
+
+Task 2 (`agent/agent_session.py`: preflight checks, `RunBudget`,
+`GoalCondition`, `AgentRun`; planner `max_run_minutes` / `stop_when`;
+`OllamaClient.check_model()` via `GET /api/tags`) merged via PR #86.
+
+Task 3 (loop integration: `StepRecord.effect`, the prompt's effect text,
+the session-log `effect` record, the effect watch in `main.py`, the planner
+gate and autopilot counting `not_seen` as a failure) merged via PR #87.
+
+Task 4 (the Agent panel in `main.py`) merged via PR #88:
+- Preflight / Start Agent / Stop Agent;
+- the Ollama check runs on a worker thread;
+- every planner session is an `AgentRun`, ended by its budget or goal
+  through `_poll_agent_run`;
+- every planner stop cancels a running planner skill.
+
+Task 5 merged via PR #89:
+- `docs/USER_GUIDE.md`;
+- the example profile has a goal, the model and a 5-minute budget;
+- Load Profile fills the Model field;
+- `scripts/memory.py show` prints effects.
+
+Task 6, the live Notepad smoke test with Ollama `qwen3.5:9b`, passed all 9
+acceptance criteria on 2026-09-25 (58/58 checks; details in `docs/PLAN.md`
+"Smoke test results"):
+- effects `confirmed` / `not_seen` reached the panel, the next prompt and
+  the session log;
+- 3 `not_seen` auto steps turned auto off;
+- no Ollama call started while a watch was pending;
+- the budget and `stop_when` ended runs;
+- F8 during a pending watch dropped it and ended with `emergency stop`.
+It also fixed `docs/USER_GUIDE.md`: a goal already on screen ends a new run
+at once. When the GPU is shared with a game, Ollama calls can pass the 30 s
+default timeout; the profile's `planner.timeout_seconds` raises it.
+
+Task 6's results landed via PR #90. Task R (release close-out: CHANGELOG,
+README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.0.0"`, the
+`setup.ps1` / `check_system.ps1` banners) followed, then PR #84 closed Issue
+#82.
+
+Local leftover branches are safe for the user to delete (Claude avoids
+`git branch -D`): `claude/v1.0-*` task branches, plus the older ones listed
+below.
+
+v1.0 adds observed effects (a skill's optional `expect`, recorded as
+`confirmed` / `not_seen` after each step), agent runs (an Agent panel with
+Preflight / Start Agent / Stop Agent, a run budget and an optional goal
+condition) and a user guide. Observation never adds input, and stops only
+reduce activity. Claude settled the design on 2026-09-25 under the user's
+standing grant of full autonomy (see `docs/PLAN.md` "Design decisions").
+
 **v0.8.0 "Session memory" (Issue #71) is released.** The integration branch
 `feature/v0.8-session-memory` merged into `main` via PR #73 as a merge
-commit, which closed Issue #71. `main` has `APP_VERSION = "0.8.0"`. Next is
-planning v1.0 in its own issue and milestone branch.
+commit, which closed Issue #71. `main` has `APP_VERSION = "0.8.0"`.
 
 ### v0.8 history (for reference)
 
@@ -413,11 +482,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 is released, and no milestone is active. Next: scope v1.0 ("Personal
-Game Agent", see `docs/ROADMAP.md`) in a new issue with its own
-`feature/<milestone>` branch, spec in `docs/PLAN.md`, and draft release PR.
-Codex's quota resets 2026-09-25 13:55, so pure-logic tasks can go to Codex
-again after that.
+None scheduled. v1.0 is released. The next milestone needs scoping first:
+open an issue, create a `feature/<milestone>` branch from `main`, and write
+its spec with a design constraint and acceptance criteria in
+`docs/PLAN.md`. Candidates are in `docs/ROADMAP.md` "Next".
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -453,7 +521,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-No milestone issue is open. Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+None. Issue #82 (v1.0), Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons

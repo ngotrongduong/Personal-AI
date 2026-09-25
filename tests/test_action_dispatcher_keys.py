@@ -336,6 +336,7 @@ class HoldTests(KeyDispatchTestCase):
         self.assertEqual(self.input.calls, [("down", "space"), ("up", "space")])
         self.assertGreaterEqual(elapsed, 0.14)
         self.assertNotIn("cancelled", result.reason)
+        self.assertFalse(result.interrupted)
         self.assertFalse(self.dispatcher.busy)
 
     def test_hold_over_profile_max_blocks(self) -> None:
@@ -385,6 +386,7 @@ class HoldTests(KeyDispatchTestCase):
         thread.join(2.0)
         self.assertFalse(thread.is_alive())
         self.assertIn("cancelled", box["result"].reason)
+        self.assertTrue(box["result"].interrupted)
         self.assertEqual(self.input.down, set())
 
     def test_disabling_input_mid_hold_ends_it(self) -> None:
@@ -394,6 +396,7 @@ class HoldTests(KeyDispatchTestCase):
         thread.join(2.0)
         self.assertFalse(thread.is_alive())
         self.assertIn("input disabled", box["result"].reason)
+        self.assertTrue(box["result"].interrupted)
         self.assertEqual(self.input.down, set())
         self.assertFalse(self.dispatcher.busy)
 
@@ -446,6 +449,7 @@ class HoldTests(KeyDispatchTestCase):
         thread.join(2.0)
         self.assertFalse(thread.is_alive())
         self.assertIn("lost foreground", box["result"].reason)
+        self.assertTrue(box["result"].interrupted)
         self.assertEqual(self.input.down, set())
 
     def test_preset_cancel_event_sends_no_key(self) -> None:

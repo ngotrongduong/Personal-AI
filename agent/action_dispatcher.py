@@ -24,6 +24,8 @@ class DispatchResult:
     intent: ActionIntent
     dispatched: bool
     reason: str
+    # A hold that was cut short (cancelled, input off, lost foreground).
+    interrupted: bool = False
 
 
 RegionResolver = Callable[[int], tuple[int, int, int, int]]
@@ -289,7 +291,7 @@ class ActionDispatcher:
             reason += f" ({ending})"
         if release_error is not None:
             reason += f"; key_up failed: {release_error}"
-        return DispatchResult(intent, True, reason + ".")
+        return DispatchResult(intent, True, reason + ".", interrupted=ending != "completed")
 
     def _wait_hold(self, event: threading.Event, seconds: float, hwnd: int) -> str:
         deadline = time.monotonic() + seconds

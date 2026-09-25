@@ -1,4 +1,4 @@
-"""List, show and validate planner memory: notes and session logs (v0.8).
+"""List, show and validate planner memory: notes and session logs (v0.8, effects v1.0).
 
 Usage (from the repo root, with the venv's python):
 
@@ -106,6 +106,11 @@ def _record_line(record: dict[str, object]) -> str:
         result = {True: "ok", False: "failed", None: "-"}.get(record.get("ok"), "-")
         return (f"step: {record.get('skill')} {record.get('decision')} -> {result}, "
                 f"{record.get('outcome')} (reason: {record.get('reason')})")
+    if kind == "effect":
+        waited = record.get("waited_s")
+        took = f", {waited:g}s" if isinstance(waited, (int, float)) else ""
+        effect = str(record.get("effect")).replace("_", " ")
+        return f"effect: {record.get('skill')} {effect} ({record.get('detector')}{took})"
     if kind == "auto":
         state = "on" if record.get("on") else "off"
         limit = record.get("max_steps")
@@ -128,6 +133,9 @@ def _show_session(path: Path) -> int:
     start = next((r for r in records if r.get("type") == "session_start"), None)
     if start is not None:
         print(f"  app {start.get('app_version')}, profile {start.get('profile') or '(none)'}")
+    effects = Counter(str(r.get("effect")) for r in records if r.get("type") == "effect")
+    if effects:
+        print(f"  effects: {effects['confirmed']} confirmed / {effects['not_seen']} not seen")
     if records and records[-1].get("type") != "session_end":
         print("  (no session_end: still running, or the app stopped abruptly)")
     for record in records:
