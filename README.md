@@ -1,9 +1,31 @@
-# Personal Game AI v0.8.0
+# Personal Game AI v1.0.0
 
-Current release: **v0.8 — Session memory**. See `CHANGELOG.md` for the
-full history and `docs/ARCHITECTURE.md` for the runtime design.
+Current release: **v1.0 — Personal Game Agent**. New here? Start with
+[`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), which goes from install to a first
+supervised agent run on Notepad. See `CHANGELOG.md` for the full history and
+`docs/ARCHITECTURE.md` for the runtime design.
 
-## v0.8 at a glance
+## v1.0 at a glance
+
+- **The agent sees what its steps did.** A skill can declare `expect`, e.g.
+  "after `open_chest`, `chest_open` should be visible within 2 s". After each
+  step the app records the effect as `confirmed` or `not_seen`. The model sees
+  it in the next prompt, the session log records it, and in auto mode 3
+  `not_seen` steps in a row turn auto off. A step is never retried.
+- **Agent panel:** **Preflight** lists what is ready (profile, capture,
+  model settings, Ollama and the model, an enabled skill) and what is only
+  advice (input control, the goal). **Start Agent** starts the planner only
+  when every required check passes. It never turns on input control or auto
+  mode. **Stop Agent** ends the run.
+- **Runs are bounded.** Every run has a time budget (`planner.max_run_minutes`,
+  15 min by default, at most 120) and can have a goal detector
+  (`planner.stop_when`) that ends it. The run line shows the time left, the
+  steps, the effects and the goal.
+- **Stops only reduce activity.** The budget, the goal and a failed preflight
+  can stop the planner or refuse to start it; they never turn anything on. F8
+  still stops everything and drops a pending effect watch.
+
+## v0.8 session memory
 
 - **Session log:** every planner session (planner on → planner off, F8 or app
   close) writes one JSON line per event to
@@ -234,5 +256,6 @@ or protected-process evasion.
 
 ## Next milestone
 
-See `docs/ROADMAP.md`. v0.8 (session memory) is released; next is planning
-v1.0, which ties the pieces together into one personal game agent.
+See `docs/ROADMAP.md`. v1.0 (Personal Game Agent) is released. Later work
+(multiple templates, OCR, HP-bar analysis, imitation-learning experiments)
+is listed there.

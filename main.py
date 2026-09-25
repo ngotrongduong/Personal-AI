@@ -89,7 +89,7 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "0.8.0"
+APP_VERSION = "1.0.0"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
 PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
 PLANNER_MESSAGE_MAX_CHARS = 100

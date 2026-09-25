@@ -313,6 +313,45 @@ rules, autopilot, executor and dispatcher never read notes or logs, and
 `tests/test_memory_boundary.py` checks that the memory modules never import
 the input path.
 
+## v1.0 personal agent
+
+```text
+Agent panel ── Preflight / Start Agent ──► run_preflight(PreflightFacts)
+                                            └─ Ollama check_model() on a worker thread
+          all required checks pass ──► planner on + AgentRun(RunBudget, GoalCondition)
+planner step ran (ok, completed, input on, skill has expect)
+          ──► _effect_pending set ──► EffectWatch(skill, expectation, finished_at)
+Tk loop ── latest GameState ──► EffectWatch.check ──► confirmed | not_seen
+          ──► step history (next prompt) + AgentRun + session log "effect"
+          ──► autopilot result (not_seen = failed step) ──► _effect_pending clear
+Tk loop ── AgentRun.stop_reason(GameState, now) ──► "run budget reached" | "goal reached"
+          ──► planner stop (auto off, session_end)
+```
+
+- `agent/skill_effects.py`: `Expectation` (`detector`, `visible`,
+  `within_seconds` ≤ 10, `min_confidence`), `parse_expectation` and
+  `EffectWatch`. A watch only counts an observation made after the step
+  finished and before its deadline.
+- `agent/agent_session.py`: `PreflightFacts` → `run_preflight` →
+  `PreflightReport` (required checks vs advice), `RunBudget`
+  (`planner.max_run_minutes`, default 15, at most 120), `GoalCondition`
+  (`planner.stop_when`, seen in a fresh frame after the run started) and
+  `AgentRun`, which counts steps and effects for the run line.
+- `main.py`: the scheduler thread's `_planner_may_plan` skips the LLM call
+  while a proposal is pending, a skill runs or `_effect_pending` is set. The
+  Event is set before the proposal mailbox is released, so no cycle starts
+  between the step and its watch. F8, input off, Clear Rules, planner
+  off/restart and profile load drop the watch without an `effect` record.
+- Preflight's Ollama check runs on a worker thread and reports through the
+  Tk queue. F8 or Stop Agent cancels the pending start, so a late result is
+  only shown.
+
+Agent invariant: observation never adds input, and stops only reduce
+activity. The budget, the goal, a `not_seen` effect and a failed preflight
+can stop the planner, turn auto off or refuse a start; they never turn input
+control, auto mode or a skill on. `tests/test_observation_boundary.py` checks
+that the observation modules never import the input path.
+
 ## Why the LLM is not in the fast loop
 
 The local LLM sits above the deterministic rule layer. It can choose goals or

@@ -1,5 +1,8 @@
 # v1.0 detailed plan — Personal Game Agent
 
+**Status: released as v1.0.0** (PR #84 into `main`, Issue #82 closed). This
+plan is kept for reference until the next milestone replaces it.
+
 Granular checklist for the current milestone (GitHub Issue #82), with
 status and owner, so progress can be checked without opening GitHub. This is
 the same checklist as Issue #82. **Keep them in sync:** when you tick
@@ -190,7 +193,7 @@ of full autonomy):
 | 4 | UI Agent panel + budget / goal stops | Done | Claude, safety-reviewer | `tests/test_main_agent.py` (24). The Agent box has Preflight / Start Agent / Stop Agent, the check list and a run line (`Run: 14:32 left · 1 step(s) · effects 1 confirmed / 0 not seen · goal: x_glyph visible`). `check_model` runs on a worker thread and reports through a queue drained in `_poll_preview`. The other facts are re-read on the Tk thread when the result arrives, and a changed Model field fails the check. Start Agent only starts the planner: input control and auto mode are never touched. Every planner start is an `AgentRun`, whether from Start Agent or the checkbox, and every planner stop ends it. The run is built before the planner starts, so a running planner always has a budget. Every planner stop also cancels a running planner skill, so a held key is released. F8 or any planner stop during the check cancels a pending start. `_poll_agent_run` ends the session with `run budget reached` / `goal reached` through `_stop_planner_for`, so auto turns off and the session log ends with that reason. Stop Agent ends it with `agent stopped`. Steps (approved/auto steps that were submitted) and effects are counted. The Ollama settings are the Model field plus the profile's host, port and timeout. |
 | 5 | `docs/USER_GUIDE.md`, example profile, `scripts/memory.py` effects | Done | Claude | `docs/USER_GUIDE.md` covers install, a first run on Notepad, how a run ends, detectors + `expect` + `stop_when` for your own game, auto mode, session logs and troubleshooting by preflight message. The example profile now has a goal, the model, `auto_max_steps` 3 and `max_run_minutes` 5. It has no `expect` / `stop_when`, because those need detectors whose template images stay local (`test_example_profile_loads`). Load Profile now fills the Model field from the profile's `planner.model`. `scripts/memory.py show` prints `effect:` lines and an `effects: X confirmed / Y not seen` summary (`tests/test_memory_cli.py` +2, `tests/test_main_agent.py` +1). |
 | 6 | Live Windows smoke test | Done | Claude | Notepad + Ollama `qwen3.5:9b`: all 9 acceptance criteria passed on 2026-09-25 (58/58 checks, see "Smoke test results" below). Found and fixed a doc error: a goal already on screen *does* end a new run at once (`docs/USER_GUIDE.md`). |
-| R | Release close-out (v1.0.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.0.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #82. |
+| R | Release close-out (v1.0.0) | Done | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.0.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #82. |
 
 Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
 - Each task lands through a `claude/…` or `codex/…` sub-branch PR into

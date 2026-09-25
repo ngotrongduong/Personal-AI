@@ -2,6 +2,61 @@
 
 All notable project changes are tracked here.
 
+## v1.0.0 — Personal Game Agent
+
+v1.0 closes the loop vision → state → plan → action → observation. The
+planner now sees what its steps did, runs are bounded, and a user guide takes
+a new user from install to a first supervised run.
+
+- **Observed effects** (`agent/skill_effects.py`): a skill may declare
+  `expect` (`detector`, `visible`, `within_seconds` ≤ 10, `min_confidence`).
+  - After a planner step that ran, the app watches for it and records the
+    effect as `confirmed` or `not_seen`. Only observations made after the
+    step finished and before the deadline count.
+  - The effect shows in the run line, in the next prompt's recent steps
+    ("effect confirmed (x_glyph visible)") and in a new session-log record,
+    `effect`. v0.8 logs stay valid.
+  - While a watch is pending the planner makes no LLM call. In auto mode a
+    `not_seen` step counts as a failed step, so 3 in a row turn auto off. A
+    step is never retried.
+  - F8, input off, Clear Rules, planner off/restart and profile load drop the
+    watch without an `effect` record. A hold cut short (the new
+    `DispatchResult.interrupted`) or a step drained after input was switched
+    off opens no watch.
+- **Agent runs** (`agent/agent_session.py`) and a new **Agent** panel:
+  - **Preflight** lists the checks: profile, capture, planner settings,
+    Ollama and the model (`OllamaClient.check_model()`, `GET /api/tags`, on a
+    worker thread), an enabled skill; input control and the goal are advice
+    only.
+  - **Start Agent** runs the preflight and, if everything required passes,
+    starts the planner. It never turns on input control or auto mode.
+    **Stop Agent** ends the run.
+  - Every planner session is a run with a time budget,
+    `planner.max_run_minutes` (default 15, at most 120), and an optional goal
+    condition, `planner.stop_when` (a detector seen in a fresh frame after the
+    run started). They end the run with `run budget reached` / `goal
+    reached`, turn auto off and end the session log with that reason.
+  - Every planner stop cancels a running planner skill, so a held key is
+    released.
+- The planner uses the profile's Ollama `host`, `port` and `timeout_seconds`,
+  plus the Model field. Load Profile fills the Model field from
+  `planner.model`.
+- `docs/USER_GUIDE.md`: install, a first run on Notepad, how a run ends,
+  detectors + `expect` + `stop_when` for your own game, auto mode, session
+  logs and troubleshooting by preflight message. The example profile now has
+  a goal, the model, `auto_max_steps` 3 and a 5-minute budget.
+- `scripts/memory.py show` prints `effect:` lines and an
+  `effects: X confirmed / Y not seen` summary.
+- **Agent invariant:** observation never adds input, stops only reduce
+  activity, a `not_seen` effect only turns auto off sooner, and a run is
+  bounded. The observation modules never import the input path (checked by a
+  test).
+- Known harmless race: F8 pressed while a preflight's Ollama check is in
+  flight still shows that check's result in the panel; the pending start was
+  cancelled, so nothing starts.
+- Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`: all 9
+  acceptance criteria passed (see `docs/PLAN.md` "Smoke test results").
+
 ## v0.8.0 — Session memory
 
 - **Session log** (`agent/session_log.py`): each planner session writes an

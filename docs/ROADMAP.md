@@ -102,22 +102,25 @@
 - Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`, including
   F8 with an LLM call in flight.
 
-## Next (toward v1.0)
+### Stage 9 — Personal Game Agent (v1.0, Issue #82)
+- The loop vision → state → plan → action → observation is closed: a skill's
+  optional `expect` is watched after each step and recorded as `confirmed` or
+  `not_seen` in the next prompt, the run line and the session log. In auto
+  mode a `not_seen` step counts as failed; a step is never retried.
+- Agent runs: Preflight / Start Agent / Stop Agent, a run budget
+  (`planner.max_run_minutes`) and an optional goal condition
+  (`planner.stop_when`). Stops only reduce activity.
+- `docs/USER_GUIDE.md` takes a new user from install to a first supervised
+  run.
+- Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`: all 9
+  acceptance criteria passed.
 
-- v1.0 — Personal Game Agent (Issue #82, in progress on
-  `feature/v1.0-personal-agent`): observed skill effects, agent runs with
-  preflight, a run budget and a goal condition, and a user guide. See
-  `docs/PLAN.md`.
+## Next (after v1.0)
+
+- Not planned yet. Candidates: multiple templates per detector, OCR,
+  color/HP-bar analysis and object detection.
 - Imitation-learning experiments on recorded datasets remain a possible side
   track (offline training only; any replay goes through `ActionDispatcher`).
-
-## Later
-
-### v1.0 — Personal Game Agent
-- Vision -> state -> plan -> action -> observation loop.
-- Per-game profiles.
-- Long-term session memory.
-- Explicit permissions and safety controls.
 
 ## Scope / safety
 
