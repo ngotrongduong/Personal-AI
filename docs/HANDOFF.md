@@ -47,11 +47,24 @@ Task 4 (the Agent panel in `main.py`) merged via PR #88:
   through `_poll_agent_run`;
 - every planner stop cancels a running planner skill.
 
-Task 5 is done on `claude/v1.0-user-guide`:
+Task 5 merged via PR #89:
 - `docs/USER_GUIDE.md`;
 - the example profile has a goal, the model and a 5-minute budget;
 - Load Profile fills the Model field;
 - `scripts/memory.py show` prints effects.
+
+Task 6, the live Notepad smoke test with Ollama `qwen3.5:9b`, passed all 9
+acceptance criteria on 2026-09-25 (58/58 checks; details in `docs/PLAN.md`
+"Smoke test results"):
+- effects `confirmed` / `not_seen` reached the panel, the next prompt and
+  the session log;
+- 3 `not_seen` auto steps turned auto off;
+- no Ollama call started while a watch was pending;
+- the budget and `stop_when` ended runs;
+- F8 during a pending watch dropped it and ended with `emergency stop`.
+It also fixed `docs/USER_GUIDE.md`: a goal already on screen ends a new run
+at once. When the GPU is shared with a game, Ollama calls can pass the 30 s
+default timeout; the profile's `planner.timeout_seconds` raises it.
 
 v1.0 adds observed effects (a skill's optional `expect`, recorded as
 `confirmed` / `not_seen` after each step), agent runs (an Agent panel with
@@ -454,13 +467,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.0 task 6: the live Windows smoke test on Notepad with Ollama
-`qwen3.5:9b`, against the acceptance criteria in `docs/PLAN.md`. Drive the
-app in-process, because the Claude desktop overlay swallows clicks. Only
-Notepad may receive input. Build the test profile under `profiles/`, which is
-gitignored, and never commit its template image. Work on a `claude/v1.0-…` branch with a PR into
-`feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55, so
-pure-logic tasks can go to Codex again after that.
+v1.0 task R, the release close-out:
+- CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS;
+- `APP_VERSION = "1.0.0"` and the `setup.ps1` / `check_system.ps1` banners.
+Then merge PR #84 (feature→`main`) as a merge commit, which closes Issue #82.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.

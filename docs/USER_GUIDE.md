@@ -174,8 +174,10 @@ What effects change:
   the planner or turn auto off. They never turn anything on.
 
 A goal only counts when the detector is seen *after* the run started, in a
-fresh frame. A "level done" banner already on screen does not end a new run
-at once.
+fresh frame (at most 1 s old), so a state left over from before the run
+never ends it. The check runs on every frame, though: if the goal is
+already on screen when you press Start Agent, the run ends at once. Start
+from a screen where the goal detector is not visible.
 
 ## 5. Auto mode
 
