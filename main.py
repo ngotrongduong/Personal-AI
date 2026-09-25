@@ -58,6 +58,7 @@ from agent.profile import (
 )
 from agent.rule_engine import SKILL_RULE_ACTION, ActionIntent, RuleEngine, VisibilityRule
 from agent.session_log import SessionLogWriter
+from agent.skill_effects import EFFECT_NOT_SEEN, EFFECT_PENDING, EffectWatch, Expectation
 from agent.skill_executor import SkillExecutor
 from agent.skills import ClickSkill, HoldSkill, PressSkill, Skill, SkillBook, SkillPermissions
 from agent.step_history import Decision, StepHistory, StepRecord
@@ -408,6 +409,13 @@ class PersonalGameAIApp:
         self._planner_intent: ActionIntent | None = None
         # The window auto mode was confirmed for; auto steps run nowhere else.
         self._auto_hwnd: int | None = None
+        # v1.0 observed effect of the last planner step: at most one watch,
+        # polled on the Tk thread (_poll_effect_watch). The step's history
+        # record is kept to fill in its effect. The Event lets the scheduler
+        # thread's gate skip the LLM call while a watch is pending.
+        self._effect_watch: EffectWatch | None = None
+        self._effect_record: StepRecord | None = None
+        self._effect_pending = threading.Event()
         self.planner_goal_var = tk.StringVar(value="")
         # Plain-str copy of the Goal field for the planner thread, which must
         # never read a Tk variable. Updated on the Tk thread by a trace.
@@ -952,6 +960,10 @@ class PersonalGameAIApp:
             # Input is already off, so a held key is released; end the skill too.
             self.executor.cancel()
             self._disarm_auto("input control was disabled")
+            if self._drop_effect_watch("input control was disabled"):
+                # The watched step is over; free the autopilot without counting it.
+                self.autopilot.reset()
+                self._refresh_planner_panel()
         if self.control_var.get():
             self.status_var.set("INPUT ENABLED")
             self.log("Keyboard/mouse control ENABLED.")
@@ -1581,7 +1593,9 @@ class PersonalGameAIApp:
             if intent is not None and intent is self._planner_intent:
                 self._planner_intent = None
                 self._planner_step_finished(
-                    run.result.dispatched, f"{outcome}: {run.result.reason}"
+                    run.result.dispatched,
+                    f"{outcome}: {run.result.reason}",
+                    completed=not run.result.interrupted,
                 )
 
     def _toggle_planner(self):
@@ -1692,11 +1706,16 @@ class PersonalGameAIApp:
     # ---------------- Planner steps (v0.7) ----------------
 
     def _planner_may_plan(self) -> bool:
-        """Scheduler-thread gate: skip the LLM call while a step is pending or a skill runs.
+        """Scheduler-thread gate: skip the LLM call while a step is pending, a skill
+        runs or a step's effect is still being watched.
 
-        Reads only thread-safe state (mailbox, executor), never a Tk variable.
+        Reads only thread-safe state (mailbox, executor, an Event), never a Tk variable.
         """
-        return not self.proposals.occupied and not self.executor.busy
+        return (
+            not self.proposals.occupied
+            and not self.executor.busy
+            and not self._effect_pending.is_set()
+        )
 
     def _sync_planner_goal(self, *_args):
         """Tk trace on the Goal field: keep the plain-str copy the planner reads."""
@@ -1808,9 +1827,10 @@ class PersonalGameAIApp:
         self._refresh_planner_panel()
 
     def _reset_planner_steps(self, why: str):
-        """Planner stopped: auto off, pending proposal dropped, mailbox empty."""
+        """Planner stopped: auto off, pending proposal and effect watch dropped, mailbox empty."""
         self._disarm_auto(why)
         dropped = self.autopilot.reset()
+        self._drop_effect_watch(why)
         self.proposals.clear()
         self._planner_decision = None
         self._planner_intent = None
@@ -1939,15 +1959,50 @@ class PersonalGameAIApp:
             return f"{built.reason}."
         return None
 
-    def _planner_step_finished(self, ok: bool, outcome: str, *, decision: Decision | None = None):
+    def _planner_step_finished(
+        self,
+        ok: bool,
+        outcome: str,
+        *,
+        decision: Decision | None = None,
+        completed: bool = True,
+    ):
         """Record the running planner step's result; auto may turn itself off."""
         proposal = self.autopilot.running
         if proposal is None:
             # The planner was stopped while the skill ran; nothing to record.
             return
         decision = decision or self._planner_decision or "approved"
-        auto_off = self.autopilot.record_result(ok)
+        # Only a step that ran to completion, with input still on, gets an
+        # effect watch (v1.0): an interrupted hold or a step drained after
+        # input was turned off has nothing to confirm.
+        watch = ok and completed and decision != "refused" and self.input.enabled
+        expectation = self._step_expectation(proposal.skill_name) if watch else None
+        if expectation is not None:
+            # Set before the mailbox is released so the planner waits for the effect.
+            self._effect_pending.set()
+            try:
+                record = self._finish_planner_step(
+                    proposal, decision, outcome, ok,
+                    effect=EFFECT_PENDING, expected=expectation.describe(),
+                )
+            except BaseException:
+                self._effect_pending.clear()
+                raise
+            self._effect_watch = EffectWatch(proposal.skill_name, expectation, record.finished_at)
+            self._effect_record = record
+            # The autopilot counts the step when its effect resolves.
+            self.log(
+                f"Watching for {expectation.describe()} after '{proposal.skill_name}' "
+                f"(up to {expectation.within_seconds:g}s)."
+            )
+            self._refresh_planner_panel()
+            return
         self._finish_planner_step(proposal, decision, outcome, ok if decision != "refused" else None)
+        self._record_autopilot_result(ok)
+
+    def _record_autopilot_result(self, ok: bool):
+        auto_off = self.autopilot.record_result(ok)
         if auto_off is not None:
             self._auto_hwnd = None
             self.planner_mode_var.set("approve")
@@ -1955,13 +2010,71 @@ class PersonalGameAIApp:
             self.log(f"Auto mode OFF: {auto_off}.")
             self._refresh_planner_panel()
 
-    def _finish_planner_step(
-        self, proposal: SkillProposal, decision: Decision, outcome: str, ok: bool | None
-    ):
-        """Feed the step back to the planner and free the mailbox for the next one."""
-        self.step_history.append(
-            StepRecord(proposal.skill_name, proposal.reason, decision, outcome, ok, time.monotonic())
+    def _step_expectation(self, skill_name: str) -> Expectation | None:
+        profile = self.profile
+        return profile.expectations.get(skill_name) if profile is not None else None
+
+    def _poll_effect_watch(self, now: float | None = None):
+        """Tk loop: resolve the pending effect watch against the latest GameState."""
+        watch = self._effect_watch
+        if watch is None:
+            return
+        now = time.monotonic() if now is None else now
+        effect = watch.check(self.game_state, now)
+        result = watch.result
+        if effect == EFFECT_PENDING or result is None:
+            return
+        record = self._effect_record
+        self._effect_watch = None
+        self._effect_record = None
+        if record is not None:
+            self.step_history.set_effect(record, effect)
+        self._session_write(
+            "effect",
+            skill=result.skill_name,
+            effect=effect,
+            detector=result.detector,
+            waited_s=result.waited_s,
         )
+        seen = "not seen" if effect == EFFECT_NOT_SEEN else effect
+        self.log(
+            f"Effect of '{result.skill_name}': {seen} "
+            f"({watch.expectation.describe()}, {result.waited_s:.1f}s)."
+        )
+        # A step whose effect was not seen counts as failed; it is never retried.
+        self._record_autopilot_result(effect != EFFECT_NOT_SEEN)
+        self._effect_pending.clear()
+        self._refresh_planner_panel(now)
+
+    def _drop_effect_watch(self, why: str) -> bool:
+        """Forget the pending effect watch without recording an effect."""
+        watch, record = self._effect_watch, self._effect_record
+        self._effect_watch = None
+        self._effect_record = None
+        self._effect_pending.clear()
+        if watch is None:
+            return False
+        if record is not None:
+            self.step_history.set_effect(record, "none")
+        self.log(f"Effect watch for '{watch.skill_name}' dropped because {why}.")
+        return True
+
+    def _finish_planner_step(
+        self,
+        proposal: SkillProposal,
+        decision: Decision,
+        outcome: str,
+        ok: bool | None,
+        *,
+        effect: str = "none",
+        expected: str = "",
+    ) -> StepRecord:
+        """Feed the step back to the planner and free the mailbox for the next one."""
+        record = StepRecord(
+            proposal.skill_name, proposal.reason, decision, outcome, ok, time.monotonic(),
+            effect=effect, expected=expected,
+        )
+        self.step_history.append(record)
         self._planner_decision = None
         self.proposals.release()
         self._session_write(
@@ -1973,6 +2086,7 @@ class PersonalGameAIApp:
             ok=ok,
         )
         self._refresh_planner_panel()
+        return record
 
     def _refresh_planner_panel(self, now: float | None = None):
         now = time.monotonic() if now is None else now
@@ -1986,6 +2100,12 @@ class PersonalGameAIApp:
             proposal_text = (
                 f"Proposal: {pending.skill_name} — {self._short(pending.reason)} · "
                 f"{math.ceil(autopilot.seconds_left(now))}s left"
+            )
+        elif self._effect_watch is not None:
+            watch = self._effect_watch
+            proposal_text = (
+                f"Watching: {watch.skill_name} — expecting {watch.expectation.describe()} · "
+                f"{math.ceil(max(0.0, watch.deadline - now))}s left"
             )
         elif running is not None:
             proposal_text = f"Running: {running.skill_name} — {self._short(running.reason)}"
@@ -2499,6 +2619,8 @@ class PersonalGameAIApp:
                 self._run_vision_if_due(frame)
                 self._draw_preview(frame)
 
+        # After vision, so this frame's observations count.
+        self._poll_effect_watch()
         self.root.after(33, self._poll_preview)
 
     def _draw_preview(self, frame):

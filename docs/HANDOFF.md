@@ -34,8 +34,12 @@ observation import-boundary test) merged via PR #85.
 
 Task 2 (`agent/agent_session.py`: preflight checks, `RunBudget`,
 `GoalCondition`, `AgentRun`; planner `max_run_minutes` / `stop_when`;
-`OllamaClient.check_model()` via `GET /api/tags`) is done on
-`claude/v1.0-agent-session`.
+`OllamaClient.check_model()` via `GET /api/tags`) merged via PR #86.
+
+Task 3 (loop integration: `StepRecord.effect`, the prompt's effect text,
+the session-log `effect` record, the effect watch in `main.py`, the planner
+gate and autopilot counting `not_seen` as a failure) is done on
+`claude/v1.0-loop-effects`.
 
 v1.0 adds observed effects (a skill's optional `expect`, recorded as
 `confirmed` / `not_seen` after each step), agent runs (an Agent panel with
@@ -438,12 +442,13 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.0 task 3: loop integration — `StepRecord.effect` and the prompt line,
-the session-log `effect` record, autopilot counting `not_seen`, the
-`should_plan` gate while a watch is pending, and the effect watch in
-`main.py`'s `_poll_preview` (see `docs/PLAN.md`), on a `claude/v1.0-…` branch
-with a PR into `feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55, so
-pure-logic tasks can go to Codex again after that.
+v1.0 task 4: the Agent panel in `main.py` — Preflight (with
+`check_model` on a worker thread), Start Agent (runs preflight, then starts
+the planner; never enables input or auto), Stop Agent, the run status line,
+and budget / goal stops that end the session with "run budget reached" /
+"goal reached" (see `docs/PLAN.md`). Work on a `claude/v1.0-…` branch with a
+PR into `feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55,
+so pure-logic tasks can go to Codex again after that.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.

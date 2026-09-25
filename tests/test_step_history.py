@@ -54,6 +54,47 @@ class StepHistoryTests(unittest.TestCase):
             with self.assertRaises(ValueError):
                 StepHistory(maxlen=bad)
 
+    # ---- v1.0 observed effects ----
+
+    def test_effect_defaults_to_none_and_rejects_unknown_values(self) -> None:
+        self.assertEqual(_record("a").effect, "none")
+        with self.assertRaises(ValueError):
+            StepRecord("a", "r", "approved", "x", True, 0.0, effect="maybe")
+
+    def test_set_effect_replaces_the_record_by_identity(self) -> None:
+        history = StepHistory()
+        first = StepRecord("a", "r", "approved", "x", True, 1.0, "pending", "x_glyph visible")
+        twin = StepRecord("a", "r", "approved", "x", True, 1.0, "pending", "x_glyph visible")
+        history.append(first)
+        history.append(twin)
+
+        updated = history.set_effect(twin, "confirmed")
+
+        self.assertIsNotNone(updated)
+        self.assertEqual([step.effect for step in history.recent()], ["pending", "confirmed"])
+        self.assertEqual(updated.expected, "x_glyph visible")
+        # A record that is no longer kept is ignored.
+        history.clear()
+        self.assertIsNone(history.set_effect(first, "confirmed"))
+
+    def test_prompt_lines_show_the_effect(self) -> None:
+        history = StepHistory()
+        history.append(StepRecord("a", "r", "approved", "Pressed 'x'.", True, 100.0))
+        history.append(
+            StepRecord("b", "r", "auto", "Pressed 'x'.", True, 101.0, "confirmed", "x_glyph visible")
+        )
+        history.append(
+            StepRecord("c", "r", "auto", "Pressed 'x'.", True, 102.0, "not_seen", "menu\nhidden")
+        )
+        history.append(StepRecord("d", "r", "auto", "Pressed 'x'.", True, 103.0, "pending"))
+
+        lines = history.prompt_lines(now=104.0)
+
+        self.assertEqual(lines[0], "- a: approved, Pressed 'x'. (4s ago)")
+        self.assertEqual(lines[1], "- b: auto, Pressed 'x'. (3s ago), effect confirmed (x_glyph visible)")
+        self.assertEqual(lines[2], "- c: auto, Pressed 'x'. (2s ago), effect not seen (menu hidden)")
+        self.assertEqual(lines[3], "- d: auto, Pressed 'x'. (1s ago), effect pending (expected change)")
+
 
 if __name__ == "__main__":
     unittest.main()
