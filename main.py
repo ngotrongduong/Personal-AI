@@ -1421,6 +1421,8 @@ class PersonalGameAIApp:
         # Planner steps of another profile's skills mean nothing here.
         self.step_history.clear()
         self.planner_goal_var.set(profile.planner.goal)
+        if profile.planner.ollama is not None:
+            self.planner_model_var.set(profile.planner.ollama.model)
         self.planner_auto_steps_var.set(str(profile.planner.auto_max_steps))
         self.memory_llm_notes_var.set(profile.planner.llm_notes)
         self._switch_notebook(slug)

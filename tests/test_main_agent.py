@@ -266,6 +266,20 @@ class MainAgentTests(PlannerPanelTestCase):
         [config] = seen
         self.assertEqual((config.host, config.port, config.model), ("127.0.0.1", 11500, "qwen3.5:9b"))
 
+    def test_load_fills_the_model_field_from_the_profile(self) -> None:
+        save_profile(
+            self.profiles_dir,
+            "Notepad demo",
+            detectors=[],
+            skills=[PressSkill("type_x", "x", enabled=True)],
+            rules=[],
+            permissions=SkillPermissions(allowed_keys=frozenset({"x"})),
+            planner=PlannerConfig(ollama=OllamaClientConfig(model="llama3.2:3b")),
+        )
+        self._load()
+
+        self.assertEqual(self.app.planner_model_var.get(), "llama3.2:3b")
+
     def test_planner_restart_starts_a_new_run(self) -> None:
         self._ready()
         self._enable_planner()

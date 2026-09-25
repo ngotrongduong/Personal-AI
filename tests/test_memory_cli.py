@@ -111,6 +111,28 @@ class MemoryCliTests(unittest.TestCase):
         self.assertEqual(code, 0)
         self.assertIn("no session_end", out)
 
+    def test_show_session_with_effects(self) -> None:
+        path = new_session_path(self.root, "notepad", now=wall())
+        log = SessionLogWriter(path, clock=lambda: 0.0, wall=wall)
+        log.write("session_start", app_version="1.0.0", profile="Notepad", model="qwen3.5:9b",
+                  goal="type x", auto_max_steps=3, llm_notes=False)
+        log.write("step", skill="type_x", reason="goal", decision="approved", outcome="done", ok=True)
+        log.write("effect", skill="type_x", effect="confirmed", detector="x_glyph", waited_s=0.4)
+        log.write("step", skill="type_x", reason="goal", decision="auto", outcome="done", ok=True)
+        log.write("effect", skill="type_x", effect="not_seen", detector="x_glyph", waited_s=2)
+        log.close("goal reached")
+        code, out, _ = self.run_cli("show", str(path))
+        self.assertEqual(code, 0)
+        self.assertIn("effects: 1 confirmed / 1 not seen", out)
+        self.assertIn("effect: type_x confirmed (x_glyph, 0.4s)", out)
+        self.assertIn("effect: type_x not seen (x_glyph, 2s)", out)
+        self.assertIn("end: goal reached", out)
+
+    def test_session_without_effects_has_no_effect_line(self) -> None:
+        code, out, _ = self.run_cli("show", str(self.make_session()))
+        self.assertEqual(code, 0)
+        self.assertNotIn("effects:", out)
+
     def test_show_broken_session_prints_problems(self) -> None:
         path = self.make_session()
         with path.open("a", encoding="utf-8") as handle:
