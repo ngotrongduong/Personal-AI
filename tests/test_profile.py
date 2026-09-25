@@ -102,6 +102,13 @@ class LoadProfileTests(ProfileTestCase):
         self.assertFalse(book.is_enabled("type_x"))
         self.assertFalse(book.is_enabled("hold_space"))
         self.assertFalse(profile.planner.enabled)
+        self.assertEqual(profile.planner.ollama.model, "qwen3.5:9b")
+        self.assertEqual(profile.planner.max_run_minutes, 5)
+        self.assertEqual(profile.planner.auto_max_steps, 3)
+        self.assertIn("Notepad", profile.planner.goal)
+        # expect / stop_when need detectors, whose template images stay local.
+        self.assertEqual(dict(profile.expectations), {})
+        self.assertIsNone(profile.planner.stop_when)
 
     def test_valid_profile_loads_everything(self) -> None:
         profile = load_profile(self.write(_valid_profile()))

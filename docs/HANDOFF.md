@@ -40,12 +40,18 @@ Task 3 (loop integration: `StepRecord.effect`, the prompt's effect text,
 the session-log `effect` record, the effect watch in `main.py`, the planner
 gate and autopilot counting `not_seen` as a failure) merged via PR #87.
 
-Task 4 (the Agent panel in `main.py`) is done on `claude/v1.0-agent-panel`:
+Task 4 (the Agent panel in `main.py`) merged via PR #88:
 - Preflight / Start Agent / Stop Agent;
 - the Ollama check runs on a worker thread;
 - every planner session is an `AgentRun`, ended by its budget or goal
   through `_poll_agent_run`;
 - every planner stop cancels a running planner skill.
+
+Task 5 is done on `claude/v1.0-user-guide`:
+- `docs/USER_GUIDE.md`;
+- the example profile has a goal, the model and a 5-minute budget;
+- Load Profile fills the Model field;
+- `scripts/memory.py show` prints effects.
 
 v1.0 adds observed effects (a skill's optional `expect`, recorded as
 `confirmed` / `not_seen` after each step), agent runs (an Agent panel with
@@ -448,12 +454,11 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.0 task 5 has three parts:
-- `docs/USER_GUIDE.md`: a step-by-step guide from setup to an agent run on Notepad;
-- `profiles/example/profile.json`: show `expect` and `stop_when`. Keep the example-profile test passing;
-- `scripts/memory.py`: show `effect` records.
-
-Work on a `claude/v1.0-…` branch with a PR into
+v1.0 task 6: the live Windows smoke test on Notepad with Ollama
+`qwen3.5:9b`, against the acceptance criteria in `docs/PLAN.md`. Drive the
+app in-process, because the Claude desktop overlay swallows clicks. Only
+Notepad may receive input. Build the test profile under `profiles/`, which is
+gitignored, and never commit its template image. Work on a `claude/v1.0-…` branch with a PR into
 `feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55, so
 pure-logic tasks can go to Codex again after that.
 
