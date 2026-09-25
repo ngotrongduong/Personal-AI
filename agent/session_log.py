@@ -27,6 +27,7 @@ _COMMON_FIELDS = frozenset({"v", "type", "t", "wall"})
 _DECISIONS = frozenset({"approved", "auto", "rejected", "expired", "refused"})
 _NOTE_ACTIONS = frozenset({"add", "edit", "delete", "skip"})
 _NOTE_SOURCES = frozenset({"user", "llm"})
+_EFFECTS = frozenset({"confirmed", "not_seen"})
 
 
 def _text(value: object) -> bool:
@@ -47,6 +48,10 @@ def _optional_bool(value: object) -> bool:
 
 def _optional_int(value: object) -> bool:
     return value is None or (isinstance(value, int) and not isinstance(value, bool))
+
+
+def _number(value: object) -> bool:
+    return isinstance(value, (int, float)) and not isinstance(value, bool) and value >= 0
 
 
 def _bool(value: object) -> bool:
@@ -78,6 +83,13 @@ EVENT_FIELDS: Mapping[str, Mapping[str, Callable[[object], bool]]] = {
         "decision": _one_of(_DECISIONS),
         "outcome": _text,
         "ok": _optional_bool,
+    },
+    # v1.0: the observed effect of the previous step, written when it resolves.
+    "effect": {
+        "skill": _text,
+        "effect": _one_of(_EFFECTS),
+        "detector": _text,
+        "waited_s": _number,
     },
     "auto": {"on": _bool, "reason": _text, "max_steps": _optional_int},
     "note": {"action": _one_of(_NOTE_ACTIONS), "source": _one_of(_NOTE_SOURCES), "text": _text},
