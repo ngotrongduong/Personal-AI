@@ -189,7 +189,7 @@ of full autonomy):
 | 3 | Loop integration: step effect, prompt, `effect` log record, autopilot, planner gate | Done | Claude, safety-reviewer | `tests/test_main_effects.py` (12) + step-history / session-log / dispatcher tests. `StepRecord.effect` (`none` / `pending` / `confirmed` / `not_seen`) and `expected`; `StepHistory.set_effect`; the prompt line ends with `effect confirmed (x_glyph visible)` or `effect not seen (…)`. After a step that ran and whose skill has `expect`, `main.py` opens an `EffectWatch`, polled in `_poll_preview`. While it runs, `_effect_pending` closes the planner gate and the autopilot keeps the step as running, so a stray proposal is dropped. When it resolves, it writes the `effect` log record and counts `not_seen` as a failed step (3 in a row turn auto off). F8, input off, clear rules, planner off/restart and profile load drop the watch without an `effect` record. A hold cut short (`DispatchResult.interrupted`) or a step drained after input was switched off opens no watch. A step is never retried. |
 | 4 | UI Agent panel + budget / goal stops | Done | Claude, safety-reviewer | `tests/test_main_agent.py` (24). The Agent box has Preflight / Start Agent / Stop Agent, the check list and a run line (`Run: 14:32 left · 1 step(s) · effects 1 confirmed / 0 not seen · goal: x_glyph visible`). `check_model` runs on a worker thread and reports through a queue drained in `_poll_preview`. The other facts are re-read on the Tk thread when the result arrives, and a changed Model field fails the check. Start Agent only starts the planner: input control and auto mode are never touched. Every planner start is an `AgentRun`, whether from Start Agent or the checkbox, and every planner stop ends it. The run is built before the planner starts, so a running planner always has a budget. Every planner stop also cancels a running planner skill, so a held key is released. F8 or any planner stop during the check cancels a pending start. `_poll_agent_run` ends the session with `run budget reached` / `goal reached` through `_stop_planner_for`, so auto turns off and the session log ends with that reason. Stop Agent ends it with `agent stopped`. Steps (approved/auto steps that were submitted) and effects are counted. The Ollama settings are the Model field plus the profile's host, port and timeout. |
 | 5 | `docs/USER_GUIDE.md`, example profile, `scripts/memory.py` effects | Done | Claude | `docs/USER_GUIDE.md` covers install, a first run on Notepad, how a run ends, detectors + `expect` + `stop_when` for your own game, auto mode, session logs and troubleshooting by preflight message. The example profile now has a goal, the model, `auto_max_steps` 3 and `max_run_minutes` 5. It has no `expect` / `stop_when`, because those need detectors whose template images stay local (`test_example_profile_loads`). Load Profile now fills the Model field from the profile's `planner.model`. `scripts/memory.py show` prints `effect:` lines and an `effects: X confirmed / Y not seen` summary (`tests/test_memory_cli.py` +2, `tests/test_main_agent.py` +1). |
-| 6 | Live Windows smoke test | Todo | Claude | Notepad + Ollama `qwen3.5:9b`, the acceptance criteria below. |
+| 6 | Live Windows smoke test | Done | Claude | Notepad + Ollama `qwen3.5:9b`: all 9 acceptance criteria passed on 2026-09-25 (58/58 checks, see "Smoke test results" below). Found and fixed a doc error: a goal already on screen *does* end a new run at once (`docs/USER_GUIDE.md`). |
 | R | Release close-out (v1.0.0) | Todo | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.0.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #82. |
 
 Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
@@ -218,6 +218,40 @@ Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
 9. All v0.3–v0.8 safety invariants still hold, `scripts/memory.py validate
    --all` passes, and `git status` shows nothing under `memory/` or
    `profiles/`.
+
+## Smoke test results (task 6, 2026-09-25)
+
+Driven in-process against a throwaway Notepad tab with Ollama 0.34.3 and
+`qwen3.5:9b`. The only key ever sent was `x`, into Notepad. The test
+profiles (`smoke_v10*`) and their `x_glyph` template stayed under the
+gitignored `profiles/`, and their session logs under `memory/`. Each profile
+had `type_x` (`expect` x_glyph visible, 2 s) and `type_x_gone` (`expect`
+x_glyph gone, 3 s, which never happens because the x stays).
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 1 | Preflight lists every check; refusals | Pass. All 7 checks listed, input off only a `[NOTE]`, Preflight starts nothing. Start Agent refused, with the reason in the panel and the log, for capture off, no enabled skill, a missing model (`run: ollama pull …`) and Ollama unreachable (port 1). |
+| 2 | Start Agent starts only the planner | Pass. Planner and session log started; input control and auto mode stayed off. |
+| 3 | Effects `confirmed` / `not_seen` | Pass. Approve `type_x` → `confirmed` in 0.014 s; approve `type_x_gone` → `not_seen` after 3 s. Both show in the run line (`effects 1 confirmed / 1 not seen`), in the next prompt (`effect confirmed (x_glyph visible)`, `effect not seen (x_glyph gone)`) and as `effect` log records. |
+| 4 | 3 `not_seen` in auto turn auto off | Pass. Auto (cap 5) ran 3 `type_x_gone` steps, each `not_seen`, then turned off with "3 failed steps in a row". No retry. |
+| 5 | No Ollama call while a watch is pending | Pass. 6 watch intervals, 7 calls, 0 overlaps (sampled every 5 ms). |
+| 6 | Budget and goal end the run | Pass. A 0.5-minute budget ended the run after 30.0 s (`run budget reached`). With `stop_when` x_glyph, the first approved `type_x` ended the run (`goal reached`), auto off, input unchanged. |
+| 7 | F8 during a pending watch | Pass. Input off, planner stopped, auto off, watch dropped with a log line, the session ended with `emergency stop` and no `effect` record, and no Ollama request followed. |
+| 8 | Bad profiles rejected, example loads | Pass. Unknown `expect` detector, unknown `stop_when` field and `max_run_minutes` 0 each failed with a message naming the problem; the example loaded and filled the Model field. |
+| 9 | Invariants, validate, git status | Pass. `scripts/memory.py validate --all` 21/21 OK, `git status` clean apart from the doc fix, 675 tests pass (1 skipped), ruff clean. |
+
+Notes:
+- The first runs shared the GPU with an emulator and a game (11.5 of 12.3 GB
+  in use). Ollama calls then took over 30 s and hit the default timeout, so
+  the smoke profiles set `timeout_seconds` 240. With the GPU free, a cycle
+  took about 3 s.
+- One run also showed that the smoke scenario must reject a proposal that was
+  made before the enabled skills changed. That is correct app behaviour: a
+  pending proposal is not re-planned when skills change, and approving it is
+  still checked against the enabled skills at run time.
+- The goal check uses fresh per-frame observations, so a goal detector that
+  is already visible ends a new run at once. `docs/USER_GUIDE.md` said the
+  opposite and was fixed.
 
 ## Explicitly out of scope for v1.0
 
