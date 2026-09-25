@@ -18,6 +18,7 @@ class OllamaErrorKind(str, Enum):
     TIMEOUT = "timeout"
     HTTP_STATUS = "http_status"
     RESPONSE_FORMAT = "response_format"
+    MODEL_MISSING = "model_missing"
 
 
 @dataclass(frozen=True, slots=True)
@@ -140,9 +141,68 @@ class OllamaClient:
             )
         return OllamaResult(text=decoded["response"])
 
+    def check_model(self) -> OllamaResult:
+        """Check that Ollama answers and lists the configured model (v1.0 preflight).
+
+        Sends ``GET /api/tags``; on success ``text`` is a short human-readable
+        detail. Blocking: call it off the Tk thread.
+        """
+
+        request = Request(self._base_url + "/api/tags", method="GET")
+        try:
+            body = self._transport(request, float(self._config.timeout_seconds))
+        except HTTPError as error:
+            return OllamaResult(
+                error=OllamaError(
+                    OllamaErrorKind.HTTP_STATUS,
+                    f"Ollama returned HTTP {error.code}.",
+                    status_code=error.code,
+                )
+            )
+        except (TimeoutError, URLError, OSError, HTTPException, ValueError) as error:
+            return OllamaResult(error=_network_error(error))
+
+        try:
+            decoded = json.loads(body.decode("utf-8"))
+        except (UnicodeDecodeError, json.JSONDecodeError) as error:
+            return OllamaResult(
+                error=OllamaError(
+                    OllamaErrorKind.RESPONSE_FORMAT,
+                    f"Ollama returned invalid JSON: {error}.",
+                )
+            )
+        models = decoded.get("models") if isinstance(decoded, dict) else None
+        if not isinstance(models, list):
+            return OllamaResult(
+                error=OllamaError(
+                    OllamaErrorKind.RESPONSE_FORMAT,
+                    "Ollama /api/tags did not contain a 'models' list.",
+                )
+            )
+        names = {
+            str(entry.get(key))
+            for entry in models
+            if isinstance(entry, dict)
+            for key in ("name", "model")
+            if isinstance(entry.get(key), str)
+        }
+        wanted = self._config.model
+        if wanted in names or (":" not in wanted and f"{wanted}:latest" in names):
+            return OllamaResult(text=f"model {wanted!r} is available")
+        return OllamaResult(
+            error=OllamaError(
+                OllamaErrorKind.MODEL_MISSING,
+                f"Model {wanted!r} is not installed; run: ollama pull {wanted}",
+            )
+        )
+
+    @property
+    def _base_url(self) -> str:
+        return f"http://{self._config.host}:{self._config.port}"
+
     @property
     def _endpoint_url(self) -> str:
-        return f"http://{self._config.host}:{self._config.port}/api/generate"
+        return self._base_url + "/api/generate"
 
 
 def _default_transport(request: Request, timeout_seconds: float) -> bytes:

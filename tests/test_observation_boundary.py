@@ -32,17 +32,13 @@ FORBIDDEN = frozenset(
 
 class ObservationBoundaryTests(unittest.TestCase):
     def test_observation_modules_never_reach_the_input_path(self) -> None:
-        checked = 0
         for module in OBSERVATION_MODULES:
-            if not (ROOT / module).exists():
-                continue  # agent_session.py arrives in v1.0 task 2.
-            checked += 1
+            self.assertTrue((ROOT / module).exists(), module)
             with self.subTest(module=module):
                 reached = reachable_modules(module) | imported_modules(module)
                 self.assertEqual(reached & FORBIDDEN, set())
                 self.assertEqual({name for name in reached if name.startswith("core.")}, set())
                 self.assertEqual(dynamic_imports(module), [])
-        self.assertGreaterEqual(checked, 1)
 
     def test_the_forbidden_set_is_really_on_the_input_path(self) -> None:
         # Guards the check itself: the dispatcher does reach these names.
