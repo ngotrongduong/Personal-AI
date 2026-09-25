@@ -104,8 +104,10 @@
 
 ## Next (toward v1.0)
 
-- v1.0 — tie the pieces together into one personal game agent; scope to be
-  planned in its own issue.
+- v1.0 — Personal Game Agent (Issue #82, in progress on
+  `feature/v1.0-personal-agent`): observed skill effects, agent runs with
+  preflight, a run budget and a goal condition, and a user guide. See
+  `docs/PLAN.md`.
 - Imitation-learning experiments on recorded datasets remain a possible side
   track (offline training only; any replay goes through `ActionDispatcher`).
 

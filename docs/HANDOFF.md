@@ -18,10 +18,25 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-25)
 
+**v1.0 "Personal Game Agent" (Issue #82) is in progress** on
+`feature/v1.0-personal-agent`, branched from `main` at the v0.8.0 release.
+Task 0 (kickoff) is done:
+- Issue #82;
+- the branch;
+- the `docs/PLAN.md` spec with its design constraint and acceptance criteria;
+- the `AGENTS.md` agent invariant;
+- the draft release PR feature→`main`.
+
+v1.0 adds observed effects (a skill's optional `expect`, recorded as
+`confirmed` / `not_seen` after each step), agent runs (an Agent panel with
+Preflight / Start Agent / Stop Agent, a run budget and an optional goal
+condition) and a user guide. Observation never adds input, and stops only
+reduce activity. Claude settled the design on 2026-09-25 under the user's
+standing grant of full autonomy (see `docs/PLAN.md` "Design decisions").
+
 **v0.8.0 "Session memory" (Issue #71) is released.** The integration branch
 `feature/v0.8-session-memory` merged into `main` via PR #73 as a merge
-commit, which closed Issue #71. `main` has `APP_VERSION = "0.8.0"`. Next is
-planning v1.0 in its own issue and milestone branch.
+commit, which closed Issue #71. `main` has `APP_VERSION = "0.8.0"`.
 
 ### v0.8 history (for reference)
 
@@ -413,11 +428,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v0.8 is released, and no milestone is active. Next: scope v1.0 ("Personal
-Game Agent", see `docs/ROADMAP.md`) in a new issue with its own
-`feature/<milestone>` branch, spec in `docs/PLAN.md`, and draft release PR.
-Codex's quota resets 2026-09-25 13:55, so pure-logic tasks can go to Codex
-again after that.
+v1.0 task 1: `agent/skill_effects.py` plus the profile `expect` field (see
+`docs/PLAN.md`), on a `claude/v1.0-…` branch with a PR into
+`feature/v1.0-personal-agent`. Codex's quota resets 2026-09-25 13:55, so
+pure-logic tasks can go to Codex again after that.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -453,7 +467,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-No milestone issue is open. Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+Issue #82 (v1.0 Personal Game Agent) is open. Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons

@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: none. v0.8 (`feature/v0.8-session-memory`, Issue #71) merged into `main` as a merge commit at release; the next milestone opens its own `feature/<milestone>` branch.
+- Active integration branch: `feature/v1.0-personal-agent` (Issue #82). v0.8 (`feature/v0.8-session-memory`, Issue #71) merged into `main` as a merge commit at release.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,15 +94,33 @@ feature/<milestone>
 
 ## Current priority
 
-v0.8 "Session memory" (Issue #71) is released to `main`. It was the third
-step toward v1.0:
-- v0.6 profiles + skills (released);
-- v0.7 a planner that picks skills (released);
-- v0.8 a structured session log plus bounded, user-editable notes that the
-  LLM may add (released);
-- next: v1.0, to be scoped in its own issue and milestone branch.
+v1.0 "Personal Game Agent" (Issue #82) on `feature/v1.0-personal-agent`.
+It closes the loop vision → state → plan → action → observation:
+- observed effects: a skill's optional `expect`, recorded as `confirmed` /
+  `not_seen` after each step;
+- agent runs: Preflight / Start Agent / Stop Agent, a run budget and an
+  optional goal condition;
+- a user guide.
+
+Earlier steps: v0.6 profiles + skills, v0.7 a planner that picks skills, v0.8
+session memory (all released). See `docs/PLAN.md`'s design constraint before
+implementing anything.
 
 The invariants below stay in force for every later milestone.
+
+Agent invariant (permanent, from v1.0):
+- Observation never adds input. Expectations, effect watches, preflight, the
+  run budget and the goal condition only read state, the profile and the
+  clock. `agent/skill_effects.py` and `agent/agent_session.py` never import
+  the input path.
+- Stops only reduce activity. The budget, the goal condition and a failed
+  preflight can only stop the planner or refuse to start it. Start Agent never
+  turns on input control or auto mode.
+- An effect `not_seen` can only turn auto off sooner; a step is never
+  retried because of it.
+- At most one effect watch, polled on the Tk thread; the planner makes no LLM
+  call while it is pending. F8 drops it.
+- A run is bounded: `planner.max_run_minutes` has a hard cap of 120.
 
 Memory invariant (permanent, from v0.8):
 - Memory never widens permissions. Notes and session logs are read only by
