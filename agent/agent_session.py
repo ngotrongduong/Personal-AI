@@ -72,6 +72,8 @@ class PreflightFacts:
     enabled_skills: tuple[str, ...]
     input_enabled: bool
     goal: str
+    declared_meters: tuple[str, ...] = ()
+    available_meters: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +168,24 @@ def run_preflight(facts: PreflightFacts) -> PreflightReport:
             facts.goal.strip() if facts.goal.strip() else "no goal set; the planner guesses",
         ),
     ]
+    if facts.declared_meters:
+        available = set(facts.available_meters)
+        missing = [name for name in facts.declared_meters if name not in available]
+        if missing:
+            ready = [name for name in facts.declared_meters if name in available]
+            detail = "waiting for accepted reading: " + ", ".join(missing)
+            if ready:
+                detail += " (available: " + ", ".join(ready) + ")"
+        else:
+            detail = "available: " + ", ".join(facts.declared_meters)
+        checks.append(
+            PreflightCheck(
+                "Meters",
+                not missing,
+                False,
+                detail,
+            )
+        )
     return PreflightReport(tuple(checks))
 
 
