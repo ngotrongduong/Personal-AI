@@ -153,8 +153,8 @@ Existing detector forms remain valid and unchanged.
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | In progress | ChatGPT | Issue #92 and `feature/v1.1-meters` already exist. This PR adds the PLAN, meter invariant, HANDOFF/ROADMAP and release-branch workflow. |
-| 1 | Profile `meters` block | Not started | Unassigned | Parse, strict validation, save round-trip, shared namespace with detectors, tests. |
+| 0 | Kickoff | Done | ChatGPT (PR #93) | Issue #92, active integration branch, PLAN/invariant/HANDOFF/ROADMAP and draft release PR #94 are in place. |
+| 1 | Profile `meters` block | Implementation complete — pending CI/merge | ChatGPT (`codex/v1.1-profile-meters`) | `MeterDefinition`, strict HSV/ROI/direction/confidence validation, save/load round-trip, detector/meter shared namespace rejection, dedicated tests. |
 | 2 | Meter conditions | Not started | Unassigned | `agent/meter_conditions.py`; meter forms of `expect` and `stop_when`; import-boundary tests. |
 | 3 | `MeterRule` | Not started | Unassigned | Skill-only rule, cooldown, freshness, threshold/change conditions, fail closed. |
 | 4 | Live wiring | Not started | Claude/machine lane | Measure each vision tick, status line, planner prompt, preflight note; safety review. |

@@ -23,6 +23,7 @@ import cv2
 import numpy as np
 
 from vision.detector_registry import DetectorRegistry, DetectorSpec
+from vision.resource_bar import Direction, HSVRange, ResourceBarSpec
 
 from .agent_session import check_goal_detector
 from .planner_config import PlannerConfig, load_planner_config
@@ -46,9 +47,19 @@ FORMAT_VERSION = 1
 _NAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _SLUG_INVALID = re.compile(r"[^a-z0-9_-]+")
 
-_TOP_FIELDS = {"format_version", "name", "permissions", "detectors", "skills", "rules", "planner"}
+_TOP_FIELDS = {"format_version", "name", "permissions", "detectors", "meters", "skills", "rules", "planner"}
 _PERMISSION_FIELDS = {"allowed_keys", "max_hold_seconds", "max_actions_per_second"}
 _DETECTOR_FIELDS = {"name", "template", "threshold", "roi"}
+_METER_FIELDS = {
+    "name",
+    "roi",
+    "hsv_ranges",
+    "direction",
+    "min_slice_coverage",
+    "max_gap_slices",
+    "min_confidence",
+}
+_HSV_RANGE_FIELDS = {"lower", "upper"}
 _SKILL_FIELDS = {
     ClickSkill.TYPE: {
         "name",
@@ -91,6 +102,34 @@ class DetectorDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class MeterDefinition:
+    """One profile-declared HP/resource meter.
+
+    Measurement details map directly to `vision.resource_bar.ResourceBarSpec`.
+    `min_confidence` is the profile-level acceptance threshold used by later
+    meter conditions/live wiring.
+    """
+
+    name: str
+    roi: tuple[int, int, int, int]
+    hsv_ranges: tuple[HSVRange, ...]
+    direction: Direction = "left_to_right"
+    min_slice_coverage: float = 0.50
+    max_gap_slices: int = 1
+    min_confidence: float = 0.80
+
+    def spec(self) -> ResourceBarSpec:
+        return ResourceBarSpec(
+            name=self.name,
+            roi=self.roi,
+            hsv_ranges=self.hsv_ranges,
+            direction=self.direction,
+            min_slice_coverage=self.min_slice_coverage,
+            max_gap_slices=self.max_gap_slices,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class RuleDefinition:
     """A rule that fires a skill, plus whether it starts enabled."""
 
@@ -112,6 +151,7 @@ class GameProfile:
     expectations: Mapping[str, Expectation] = field(
         default_factory=lambda: MappingProxyType({})
     )
+    meters: tuple[MeterDefinition, ...] = ()
 
     def skill_book(self) -> SkillBook:
         """A fresh `SkillBook`; skills start with their profile `enabled` flag."""
@@ -180,6 +220,14 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
     permissions = _parse_permissions(top.get("permissions", {}))
     detectors = _parse_detectors(_require_list(top.get("detectors", []), "detectors"), folder)
     detector_names = {detector.name for detector in detectors}
+    meters = _parse_meters(_require_list(top.get("meters", []), "meters"))
+    meter_names = {meter.name for meter in meters}
+    collisions = detector_names & meter_names
+    if collisions:
+        joined = ", ".join(sorted(collisions))
+        raise ProfileError(
+            f"Detector and meter names share one observation namespace; duplicate name(s): {joined}."
+        )
     skills, expectations = _parse_skills(
         _require_list(top.get("skills", []), "skills"), detector_names
     )
@@ -207,6 +255,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
         rules=rules,
         planner=planner,
         expectations=MappingProxyType(expectations),
+        meters=meters,
     )
 
 
@@ -246,6 +295,102 @@ def _parse_detectors(items: list[object], folder: Path) -> tuple[DetectorDefinit
         roi = _parse_roi(block.get("roi"), label)
         detectors.append(DetectorDefinition(name, template, threshold, roi))
     return tuple(detectors)
+
+
+
+def _parse_meters(items: list[object]) -> tuple[MeterDefinition, ...]:
+    meters: list[MeterDefinition] = []
+    seen: set[str] = set()
+
+    for index, item in enumerate(items):
+        label = f"meters[{index}]"
+        block = _require_object(item, label)
+        _reject_unknown(block, _METER_FIELDS, label)
+
+        name = _require_name(block.get("name"), f"{label}.name")
+        if name in seen:
+            raise ProfileError(f"Duplicate meter name: {name}")
+        seen.add(name)
+        meter_label = f"meter {name!r}"
+
+        roi = _parse_roi(block.get("roi"), meter_label)
+        if roi is None:
+            raise ProfileError(f"{meter_label}: 'roi' is required.")
+
+        raw_ranges = _require_list(block.get("hsv_ranges"), f"{meter_label}.hsv_ranges")
+        if not raw_ranges:
+            raise ProfileError(f"{meter_label}: hsv_ranges must contain at least one range.")
+        hsv_ranges: list[HSVRange] = []
+        for range_index, raw_range in enumerate(raw_ranges):
+            range_label = f"{meter_label}.hsv_ranges[{range_index}]"
+            range_block = _require_object(raw_range, range_label)
+            _reject_unknown(range_block, _HSV_RANGE_FIELDS, range_label)
+            lower = _parse_hsv_triplet(range_block.get("lower"), f"{range_label}.lower")
+            upper = _parse_hsv_triplet(range_block.get("upper"), f"{range_label}.upper")
+            try:
+                hsv_ranges.append(HSVRange(lower=lower, upper=upper))
+            except ValueError as error:
+                raise ProfileError(f"{range_label}: {error}") from error
+
+        direction = block.get("direction", "left_to_right")
+        if not isinstance(direction, str):
+            raise ProfileError(f"{meter_label}: direction must be a string.")
+
+        min_slice_coverage = _require_number(
+            block.get("min_slice_coverage", 0.50),
+            f"{meter_label} min_slice_coverage",
+        )
+        if not 0.0 < min_slice_coverage <= 1.0:
+            raise ProfileError(
+                f"{meter_label} min_slice_coverage must be greater than 0.0 and at most 1.0."
+            )
+
+        max_gap_slices = block.get("max_gap_slices", 1)
+        if (
+            isinstance(max_gap_slices, bool)
+            or not isinstance(max_gap_slices, int)
+            or max_gap_slices < 0
+        ):
+            raise ProfileError(f"{meter_label} max_gap_slices must be a non-negative integer.")
+
+        min_confidence = _require_unit_interval(
+            block.get("min_confidence", 0.80),
+            f"{meter_label} min_confidence",
+        )
+
+        try:
+            meter = MeterDefinition(
+                name=name,
+                roi=roi,
+                hsv_ranges=tuple(hsv_ranges),
+                direction=direction,  # type: ignore[arg-type]
+                min_slice_coverage=min_slice_coverage,
+                max_gap_slices=max_gap_slices,
+                min_confidence=min_confidence,
+            )
+            meter.spec()
+        except ValueError as error:
+            raise ProfileError(f"{meter_label}: {error}") from error
+        meters.append(meter)
+
+    return tuple(meters)
+
+
+def _parse_hsv_triplet(value: object, label: str) -> tuple[int, int, int]:
+    if (
+        not isinstance(value, list)
+        or len(value) != 3
+        or any(isinstance(part, bool) or not isinstance(part, int) for part in value)
+    ):
+        raise ProfileError(f"{label} must be [H, S, V] integers.")
+
+    hue, saturation, brightness = value
+    if not 0 <= hue <= 179:
+        raise ProfileError(f"{label} hue must be between 0 and 179.")
+    for channel_name, channel in (("saturation", saturation), ("value", brightness)):
+        if not 0 <= channel <= 255:
+            raise ProfileError(f"{label} {channel_name} must be between 0 and 255.")
+    return (hue, saturation, brightness)
 
 
 def _check_template_path(value: object, folder: Path, label: str) -> str:
@@ -429,6 +574,7 @@ def save_profile(
     name: str,
     *,
     detectors: Iterable[tuple[DetectorDefinition, np.ndarray]] = (),
+    meters: Iterable[MeterDefinition] = (),
     skills: Iterable[Skill] = (),
     rules: Iterable[RuleDefinition] = (),
     permissions: SkillPermissions | None = None,
@@ -468,6 +614,8 @@ def save_profile(
         )
         templates.append((relative, _encode_png(template_bgr, definition.name)))
 
+    meter_blocks = [_meter_block(meter) for meter in meters]
+
     data: dict[str, object] = {
         "format_version": FORMAT_VERSION,
         "name": name.strip(),
@@ -477,11 +625,12 @@ def save_profile(
             "max_actions_per_second": permissions.max_actions_per_second,
         },
         "detectors": detector_blocks,
+        "meters": meter_blocks,
         "skills": [_skill_block(skill, expectations) for skill in skills],
         "rules": [_rule_block(definition) for definition in rules],
         "planner": _planner_block(planner if planner is not None else PlannerConfig()),
     }
-    _validate_before_write(data, detector_blocks)
+    _validate_before_write(data, detector_blocks, meter_blocks)
 
     try:
         (folder / TEMPLATES_DIRNAME).mkdir(parents=True, exist_ok=True)
@@ -508,7 +657,11 @@ def list_profiles(root: str | Path) -> list[str]:
     )
 
 
-def _validate_before_write(data: dict[str, object], detector_blocks: list[dict]) -> None:
+def _validate_before_write(
+    data: dict[str, object],
+    detector_blocks: list[dict],
+    meter_blocks: list[dict[str, object]],
+) -> None:
     """Run the loader's checks on `data` without touching the real folder.
 
     Template files do not exist yet, so the detector entries are checked
@@ -521,6 +674,16 @@ def _validate_before_write(data: dict[str, object], detector_blocks: list[dict])
     names = [block["name"] for block in detector_blocks]
     if len(set(names)) != len(names):
         raise ProfileError("Duplicate detector names.")
+
+    meters = _parse_meters(list(meter_blocks))
+    meter_names = {meter.name for meter in meters}
+    collisions = set(names) & meter_names
+    if collisions:
+        joined = ", ".join(sorted(collisions))
+        raise ProfileError(
+            f"Detector and meter names share one observation namespace; duplicate name(s): {joined}."
+        )
+
     permissions = _parse_permissions(data["permissions"])
     skills, _ = _parse_skills(list(data["skills"]), set(names))  # type: ignore[arg-type]
     try:
@@ -545,6 +708,28 @@ def _encode_png(template_bgr: np.ndarray, name: str) -> bytes:
     if not ok:
         raise ProfileError(f"Could not encode the template for detector {name!r}.")
     return encoded.tobytes()
+
+
+
+def _meter_block(meter: MeterDefinition) -> dict[str, object]:
+    _require_name(meter.name, "meter name")
+    try:
+        spec = meter.spec()
+    except ValueError as error:
+        raise ProfileError(f"Meter {meter.name!r}: {error}") from error
+    _require_unit_interval(meter.min_confidence, f"Meter {meter.name!r} min_confidence")
+    return {
+        "name": spec.name,
+        "roi": list(spec.roi),
+        "hsv_ranges": [
+            {"lower": list(hsv_range.lower), "upper": list(hsv_range.upper)}
+            for hsv_range in spec.hsv_ranges
+        ],
+        "direction": spec.direction,
+        "min_slice_coverage": spec.min_slice_coverage,
+        "max_gap_slices": spec.max_gap_slices,
+        "min_confidence": meter.min_confidence,
+    }
 
 
 def _skill_block(
