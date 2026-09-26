@@ -184,9 +184,21 @@ def condition_matches_value(
     ):
         return False
     normalized_baseline = float(baseline)
-    if condition.operator == "rises":
-        return normalized_value - normalized_baseline >= condition.amount
-    return normalized_baseline - normalized_value >= condition.amount
+    difference = (
+        normalized_value - normalized_baseline
+        if condition.operator == "rises"
+        else normalized_baseline - normalized_value
+    )
+    # Normalized meter values are floats. Decimal boundaries such as
+    # 1.0 - 0.8 can be represented as 0.199999999999..., so "at least
+    # 20%" must accept a numerically-equal boundary without weakening
+    # strict below/above threshold semantics.
+    return difference >= condition.amount or math.isclose(
+        difference,
+        condition.amount,
+        rel_tol=1e-9,
+        abs_tol=1e-12,
+    )
 
 
 def meter_condition_met(
