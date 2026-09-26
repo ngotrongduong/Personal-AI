@@ -16,7 +16,27 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-25)
+## Right now (2026-09-27)
+
+**v1.1 "Meters" (Issue #92) is the active milestone** on
+`feature/v1.1-meters`; draft release PR #94 tracks integration into `main`.
+
+Merged with green Windows CI:
+- Task 0 kickoff — PR #93.
+- Task 1 profile `meters` schema — PR #95.
+- Task 2 pure fail-closed meter conditions plus meter `expect` / `stop_when` — PR #96.
+- Task 3 `MeterRule` plus profile rules — PR #97. Final audit fixes include
+  exact floating-point delta boundaries and resetting a change-rule baseline
+  across disable/re-enable.
+
+Current work:
+- PR #98 merged: Save/Save As now preserves a loaded profile's meter definitions,
+  with a UI regression test.
+- Task 5 merged via PR #99 with green Windows CI: read-only `scripts/meters.py suggest|test`, USER_GUIDE calibration docs and examples.
+- `codex/v1.1-meter-demo` prepares the harmless Task 6 smoke target, matching meter-only profile and synthetic geometry/profile tests. The live Windows run remains Claude's lane.
+- Task 4 live `main.py` measurement/prompt/preflight wiring remains the machine-access lane. It must capture a fresh accepted meter baseline at skill completion for `expect.rises/falls`.
+
+Do not duplicate Tasks 1–3 or Task 5 without checking the active branches/PRs.
 
 **v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
 branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge
@@ -480,12 +500,16 @@ instead of retained at zero confidence — two regression tests added. Realistic
 digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-state`;
 64/64 tests pass, ruff clean on the merged branch.
 
+### Active v1.1 work
+
+- Tasks 0-3 are merged: PRs #93, #95, #96 and #97.
+- The profile Save/Save As meter-preservation regression found in self-audit was fixed by PR #98.
+- Task 5 merged via PR #99 with green Windows CI.
+- `codex/v1.1-meter-demo` is preparing the Task 6 test harness; Task 4 live wiring and the actual Task 6 Windows smoke run remain Claude's machine-access lane.
+
 ### Next task
 
-None scheduled. v1.0 is released. The next milestone needs scoping first:
-open an issue, create a `feature/<milestone>` branch from `main`, and write
-its spec with a design constraint and acceptance criteria in
-`docs/PLAN.md`. Candidates are in `docs/ROADMAP.md` "Next".
+Merge the meter-demo helper after green CI. The remaining runtime dependency is Task 4 live wiring; then Claude runs Task 6 against the demo and records the 9 acceptance results.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -521,8 +545,9 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-None. Issue #82 (v1.0), Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
-Issue #1 (v0.3) and Issue #4 are all completed and closed.
+- **#92 — v1.1 Meters** (active).
+
+Issue #82 (v1.0), #71 (v0.8), #61 (v0.7), #50 (v0.6), #41 (v0.5), #15 (v0.4), #13 (old v0.4 model-foundation tracker), #1 (v0.3) and #4 are closed.
 
 ## Lessons
 

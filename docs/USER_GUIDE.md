@@ -1,4 +1,4 @@
-# Personal Game AI — User Guide (v1.0)
+# Personal Game AI — User Guide (v1.1)
 
 This guide takes you from a fresh checkout to a first supervised agent run.
 The target is Notepad, so nothing can go wrong in a game. It then shows how
@@ -178,6 +178,182 @@ fresh frame (at most 1 s old), so a state left over from before the run
 never ends it. The check runs on every frame, though: if the goal is
 already on screen when you press Start Agent, the run ends at once. Start
 from a screen where the goal detector is not visible.
+
+
+### Meters: HP, mana, stamina and progress bars
+
+v1.1 adds **meters** for UI bars whose filled amount can be read from color.
+A meter is still observation only: it adds a number to GameState, but it never
+presses a key or clicks by itself. OCR-based numbers such as `HP 742/1000`
+are a different problem and are not part of v1.1.
+
+A meter needs:
+
+- a fixed client-frame `roi: [x, y, width, height]` around the **fill area**;
+- one or more OpenCV HSV color ranges;
+- the fill direction;
+- a minimum segmentation confidence.
+
+Example:
+
+```json
+{
+  "name": "hp",
+  "roi": [20, 30, 220, 16],
+  "hsv_ranges": [
+    {"lower": [50, 180, 120], "upper": [80, 255, 255]}
+  ],
+  "direction": "left_to_right",
+  "min_slice_coverage": 0.5,
+  "max_gap_slices": 1,
+  "min_confidence": 0.8
+}
+```
+
+The full copyable example is
+[`docs/examples/meter_profile.json`](examples/meter_profile.json). Its ROI and
+colors are placeholders; calibrate them for your game before loading it.
+
+#### Calibrate from a screenshot
+
+Save a screenshot of the game at a representative state. You can use the app's
+**Save Snapshot** button or any normal screenshot tool. Then run:
+
+```powershell
+python scripts/meters.py suggest snapshots\screen.png --roi 20 30 220 16 --name hp
+```
+
+`suggest` ignores dark/grey pixels, finds the dominant colored hue in the ROI,
+and prints a validated JSON meter block. Use a screenshot where the intended
+fill color is clearly present (ideally a mostly-full bar); a saturated empty
+background can otherwise become the dominant hue. Diagnostic text goes to
+stderr, so you can save
+only the JSON with PowerShell:
+
+```powershell
+python scripts/meters.py suggest snapshots\screen.png --roi 20 30 220 16 --name hp > hp-meter.json
+```
+
+It is deliberately a **starting suggestion**, not automatic calibration. Check
+screenshots at high, medium and low meter values. If the fill changes color
+(green → yellow → red), add more HSV ranges. Red may need two ranges because
+OpenCV hue wraps around 0/179; the helper emits both when its dominant hue sits
+on that boundary.
+
+Useful tuning options:
+
+```text
+--min-saturation 80
+--min-value 80
+--hue-radius 10
+--direction left_to_right|right_to_left|top_to_bottom|bottom_to_top
+```
+
+If the UI has a decorative border, exclude it from the ROI. Meter confidence
+describes how cleanly the selected color separates filled and empty slices
+inside the ROI; it does **not** prove that the ROI still points at the correct
+game UI.
+
+#### Test a profile without running the agent
+
+After pasting the meter block into `profiles/<name>/profile.json`, test it
+against a screenshot:
+
+```powershell
+python scripts/meters.py test profiles\my_game snapshots\screen.png
+python scripts/meters.py test profiles\my_game snapshots\screen.png --meter hp
+```
+
+The command prints each meter's value, confidence and status. For calibration,
+a meter ROI must fit completely inside the screenshot; a clipped ROI is reported
+as `INVALID ROI` instead of measuring only the visible fragment. It is read-only:
+it never edits the profile, captures a window or sends input.
+
+
+#### Harmless live smoke-test target
+
+Once the v1.1 live meter wiring is present, you can test it without a game:
+
+```powershell
+python scripts/meter_demo.py
+```
+
+The demo opens **Personal Game AI - Meter Demo** with one deterministic green
+HP bar. Its client-frame ROI is `[60, 80, 400, 32]`. The matching smoke-test
+profile is `docs/examples/meter_demo_profile.json`; copy it into a local
+profile folder before loading it:
+
+```powershell
+New-Item -ItemType Directory -Force profiles\meter_demo
+Copy-Item docs\examples\meter_demo_profile.json profiles\meter_demo\profile.json
+```
+
+The target only receives normal input; it never sends any. `H` heals +20%,
+`D` damages -20%, `R` resets to 50%, and `0/1/2/3/4` set fixed levels.
+The profile deliberately has **meters but no template detectors**, so the smoke
+test also verifies that meter-only profiles still run the vision observation
+loop. Skills remain disabled until you explicitly enable them in Personal Game
+AI.
+
+#### Use meter conditions
+
+All meter values are normalized: `0.25` means 25%.
+
+A skill can expect a threshold:
+
+```json
+"expect": {
+  "meter": "hp",
+  "above": 0.60,
+  "within_seconds": 3.0,
+  "min_confidence": 0.8
+}
+```
+
+or a change after the skill:
+
+```json
+"expect": {
+  "meter": "hp",
+  "rises": 0.15,
+  "within_seconds": 3.0,
+  "min_confidence": 0.8
+}
+```
+
+The planner can stop on a fresh meter condition:
+
+```json
+"stop_when": {"meter": "hp", "above": 0.95, "min_confidence": 0.8}
+```
+
+And a profile rule can request an already-declared skill when a meter is low:
+
+```json
+{
+  "name": "heal_low_hp",
+  "meter": "hp",
+  "below": 0.25,
+  "skill": "heal",
+  "min_confidence": 0.8,
+  "cooldown_seconds": 2.0,
+  "enabled": true
+}
+```
+
+The four operators are:
+
+- `below` / `above`: compare the current accepted reading;
+- `rises` / `falls`: require a change of at least that amount from a valid
+  baseline. For `stop_when`, the baseline is the first fresh valid meter reading
+  after the run starts; meter rules instead compare consecutive accepted fresh
+  samples.
+
+Invalid, stale or low-confidence samples are false. They do not fire a rule,
+confirm an effect or end a run, and an invalid sample never becomes the baseline
+for a change condition. A meter rule only names a profile skill; the existing
+skill permissions, foreground checks, dispatcher gates and F8 emergency stop
+still control whether that skill can produce input.
 
 ## 5. Auto mode
 

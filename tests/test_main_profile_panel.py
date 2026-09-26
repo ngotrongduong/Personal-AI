@@ -12,6 +12,7 @@ import numpy as np
 
 from agent.profile import (
     DetectorDefinition,
+    MeterDefinition,
     RuleDefinition,
     load_profile,
     save_profile,
@@ -20,6 +21,7 @@ from agent.rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
 from agent.skills import ClickSkill, PressSkill, SkillPermissions
 from main import PROFILE_NONE_TEXT, PersonalGameAIApp, collect_profile_contents
 from vision.detector_registry import DetectorSpec
+from vision.resource_bar import HSVRange
 
 
 def _skip_if_no_display() -> tk.Tk | None:
@@ -318,6 +320,28 @@ class MainProfilePanelTests(unittest.TestCase):
         self.assertEqual([skill.name for skill in copy.skills], ["press_ok", "type_x"])
         self.assertEqual([definition.rule.name for definition in copy.rules], ["auto_ok"])
         self.assertFalse(copy.rules[0].enabled)
+
+    def test_resave_preserves_loaded_profile_meters(self) -> None:
+        meter = MeterDefinition(
+            name="hp",
+            roi=(2, 3, 40, 6),
+            hsv_ranges=(HSVRange((50, 100, 100), (80, 255, 255)),),
+            min_confidence=0.9,
+        )
+        save_profile(
+            self.profiles_dir,
+            "Meter Game",
+            meters=[meter],
+            skills=[PressSkill("type_x", "x", enabled=True)],
+            permissions=SkillPermissions(allowed_keys=frozenset({"x"})),
+        )
+        self._load("meter_game")
+        self.askstring.return_value = "Meter Copy"
+
+        self.app.save_current_profile()
+
+        copy = load_profile(self.profiles_dir / "meter_copy")
+        self.assertEqual(copy.meters, (meter,))
 
     def test_invalid_name_shows_error(self) -> None:
         self._register_ui_detector()

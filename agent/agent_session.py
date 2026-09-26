@@ -11,8 +11,16 @@ from __future__ import annotations
 from collections.abc import Collection, Mapping
 from dataclasses import dataclass
 import math
+from typing import TypeAlias
 
 from .game_state import GameState
+from .meter_conditions import (
+    MeterCondition,
+    MeterConditionError,
+    current_meter_value,
+    meter_condition_met,
+    parse_meter_condition,
+)
 from .skill_effects import DEFAULT_MIN_CONFIDENCE, observation_matches
 
 
@@ -24,6 +32,7 @@ STOP_BUDGET = "run budget reached"
 STOP_GOAL = "goal reached"
 
 _STOP_WHEN_FIELDS = frozenset({"detector", "visible", "min_confidence"})
+_METER_STOP_FIELDS = frozenset({"meter", "below", "above", "rises", "falls", "min_confidence"})
 
 
 class GoalConditionError(ValueError):
@@ -227,32 +236,106 @@ class GoalCondition:
         )
 
 
-def parse_goal_condition(block: object) -> GoalCondition:
-    """Validate the shape of a `stop_when` block (detectors are checked later)."""
+@dataclass(frozen=True, slots=True)
+class MeterGoalCondition:
+    """A run goal expressed as a profile meter threshold/change."""
+
+    condition: MeterCondition
+
+    @property
+    def meter(self) -> str:
+        return self.condition.meter
+
+    def describe(self) -> str:
+        return self.condition.describe()
+
+    def to_block(self) -> dict[str, object]:
+        return self.condition.to_block()
+
+    def met(
+        self,
+        state: GameState,
+        started_at: float,
+        now: float,
+        *,
+        baseline: float | None = None,
+    ) -> bool:
+        return meter_condition_met(
+            state,
+            self.condition,
+            now=now,
+            max_age_seconds=GOAL_FRESH_SECONDS,
+            after=started_at,
+            baseline=baseline,
+        )
+
+
+GoalConditionLike: TypeAlias = GoalCondition | MeterGoalCondition
+
+
+def parse_goal_condition(block: object) -> GoalConditionLike:
+    """Validate detector or meter `stop_when` shape; names are checked later."""
 
     if not isinstance(block, Mapping):
         raise GoalConditionError("stop_when must be an object.")
-    unknown = set(block) - _STOP_WHEN_FIELDS
+
+    has_detector = "detector" in block
+    has_meter = "meter" in block
+    if has_detector == has_meter:
+        raise GoalConditionError(
+            "stop_when must contain exactly one of 'detector' or 'meter'."
+        )
+
+    if has_detector:
+        unknown = set(block) - _STOP_WHEN_FIELDS
+        if unknown:
+            raise GoalConditionError(
+                f"stop_when has unknown field(s): {sorted(unknown)!r}."
+            )
+        return GoalCondition(**dict(block))  # type: ignore[arg-type]
+
+    unknown = set(block) - _METER_STOP_FIELDS
     if unknown:
-        raise GoalConditionError(f"stop_when has unknown field(s): {sorted(unknown)!r}.")
-    if "detector" not in block:
-        raise GoalConditionError("stop_when needs a 'detector'.")
-    return GoalCondition(**dict(block))
+        raise GoalConditionError(
+            f"stop_when has unknown field(s): {sorted(unknown)!r}."
+        )
+    try:
+        return MeterGoalCondition(
+            parse_meter_condition(block, None, label="stop_when")
+        )
+    except MeterConditionError as error:
+        raise GoalConditionError(str(error)) from error
 
 
-def check_goal_detector(goal: GoalCondition | None, detector_names: Collection[str]) -> None:
-    if goal is not None and goal.detector not in detector_names:
-        raise GoalConditionError(f"stop_when references unknown detector {goal.detector!r}.")
+def check_goal_detector(
+    goal: GoalConditionLike | None,
+    detector_names: Collection[str],
+    meter_names: Collection[str] = (),
+) -> None:
+    """Validate the observation name referenced by a parsed stop condition."""
+
+    if goal is None:
+        return
+    if isinstance(goal, GoalCondition):
+        if goal.detector not in detector_names:
+            raise GoalConditionError(
+                f"stop_when references unknown detector {goal.detector!r}."
+            )
+        return
+    if goal.meter not in meter_names:
+        raise GoalConditionError(f"stop_when references unknown meter {goal.meter!r}.")
 
 
 class AgentRun:
     """One bounded run: the budget and the optional goal condition."""
 
-    def __init__(self, budget: RunBudget, goal: GoalCondition | None = None) -> None:
+    def __init__(self, budget: RunBudget, goal: GoalConditionLike | None = None) -> None:
         self.budget = budget
         self.goal = goal
         self.steps = 0
         self.effects: dict[str, int] = {"confirmed": 0, "not_seen": 0}
+        self._meter_goal_baseline: float | None = None
+        self._meter_goal_baseline_ready = False
 
     @property
     def started_at(self) -> float:
@@ -261,7 +344,27 @@ class AgentRun:
     def stop_reason(self, state: GameState, now: float) -> str | None:
         """Why the run should end now, or None to keep going."""
 
-        if self.goal is not None and self.goal.met(state, self.started_at, now):
+        goal = self.goal
+        if isinstance(goal, MeterGoalCondition) and goal.condition.is_change:
+            if not self._meter_goal_baseline_ready:
+                baseline = current_meter_value(
+                    state,
+                    goal.condition,
+                    now=now,
+                    max_age_seconds=GOAL_FRESH_SECONDS,
+                    after=self.started_at,
+                )
+                if baseline is not None:
+                    self._meter_goal_baseline = baseline
+                    self._meter_goal_baseline_ready = True
+            elif goal.met(
+                state,
+                self.started_at,
+                now,
+                baseline=self._meter_goal_baseline,
+            ):
+                return STOP_GOAL
+        elif goal is not None and goal.met(state, self.started_at, now):
             return STOP_GOAL
         if self.budget.expired(now):
             return STOP_BUDGET
