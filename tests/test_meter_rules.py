@@ -169,6 +169,31 @@ class MeterRuleEngineTests(unittest.TestCase):
         self.update(1.0, 11.2)
         self.assertEqual(len(engine.evaluate(self.state, now=11.2)), 1)
 
+    def test_disable_reenable_requires_a_fresh_change_baseline(self) -> None:
+        rule = MeterRule(
+            "rise",
+            MeterCondition("hp", "rises", 0.2),
+            "heal",
+            max_observation_age_seconds=1.0,
+            cooldown_seconds=0.0,
+        )
+        engine = RuleEngine([rule])
+
+        self.update(0.4, 10.0)
+        self.assertEqual(engine.evaluate(self.state, now=10.0), [])
+
+        engine.disable_rule("rise")
+        self.update(0.8, 10.2)
+        self.assertEqual(engine.evaluate(self.state, now=10.2), [])
+
+        engine.enable_rule("rise")
+        # 0.8 becomes the new post-enable baseline; movement while disabled
+        # can never trigger the rule.
+        self.assertEqual(engine.evaluate(self.state, now=10.2), [])
+
+        self.update(1.0, 10.4)
+        self.assertEqual(len(engine.evaluate(self.state, now=10.4)), 1)
+
     def test_falls_condition(self) -> None:
         rule = MeterRule(
             "damage",
