@@ -269,6 +269,32 @@ a meter ROI must fit completely inside the screenshot; a clipped ROI is reported
 as `INVALID ROI` instead of measuring only the visible fragment. It is read-only:
 it never edits the profile, captures a window or sends input.
 
+
+#### Harmless live smoke-test target
+
+Once the v1.1 live meter wiring is present, you can test it without a game:
+
+```powershell
+python scripts/meter_demo.py
+```
+
+The demo opens **Personal Game AI - Meter Demo** with one deterministic green
+HP bar. Its client-frame ROI is `[60, 80, 400, 32]`. The matching smoke-test
+profile is `docs/examples/meter_demo_profile.json`; copy it into a local
+profile folder before loading it:
+
+```powershell
+New-Item -ItemType Directory -Force profiles\meter_demo
+Copy-Item docs\examples\meter_demo_profile.json profiles\meter_demo\profile.json
+```
+
+The target only receives normal input; it never sends any. `H` heals +20%,
+`D` damages -20%, `R` resets to 50%, and `0/1/2/3/4` set fixed levels.
+The profile deliberately has **meters but no template detectors**, so the smoke
+test also verifies that meter-only profiles still run the vision observation
+loop. Skills remain disabled until you explicitly enable them in Personal Game
+AI.
+
 #### Use meter conditions
 
 All meter values are normalized: `0.25` means 25%.

@@ -158,8 +158,8 @@ Existing detector forms remain valid and unchanged.
 | 2 | Meter conditions | Done | ChatGPT (PR #96) | Pure fail-closed meter conditions; threshold/change operators; meter forms of `expect` and `stop_when`; effect/goal baselines; profile round-trip; observation-boundary tests; green Windows CI. |
 | 3 | `MeterRule` | Done | ChatGPT (PR #97) | Skill-only rule; cooldown/freshness; consecutive accepted-sample change logic; float-boundary fix; baseline reset across disable/re-enable; green Windows CI. |
 | 4 | Live wiring | Not started | Claude/machine lane | Measure each vision tick, status line, planner prompt, preflight note; safety review. |
-| 5 | Meter tools/docs | Implementation complete — pending CI/merge | ChatGPT (PR #99) | Read-only `suggest`/`test`, USER_GUIDE and example; strict generated-option validation; clipped-ROI rejection; synthetic tests. |
-| 6 | Windows smoke test | Not started | Claude/machine lane | `scripts/meter_demo.py`; run all acceptance criteria. |
+| 5 | Meter tools/docs | Done | ChatGPT (PR #99) | Read-only `suggest`/`test`, USER_GUIDE and example; strict generated-option validation; clipped-ROI rejection; synthetic tests; green Windows CI. |
+| 6 | Windows smoke test | Harness implementation — pending CI/merge; live run not done | ChatGPT helper + Claude/machine lane | `scripts/meter_demo.py` + matching meter-only example profile and synthetic geometry test are prepared; Claude must still run the 9 live acceptance criteria on Windows. |
 | R | Release v1.1.0 | Not started | Shared | CHANGELOG/README/ROADMAP/ARCHITECTURE/version, green CI, release PR merge commit. |
 
 ## Acceptance criteria
