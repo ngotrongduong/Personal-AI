@@ -27,7 +27,8 @@ from vision.resource_bar import Direction, HSVRange, ResourceBarSpec
 
 from .agent_session import check_goal_detector
 from .planner_config import PlannerConfig, load_planner_config
-from .rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
+from .meter_conditions import MeterConditionError, parse_meter_condition
+from .rule_engine import SKILL_RULE_ACTION, MeterRule, Rule, RuleEngine, VisibilityRule
 from .skill_effects import ExpectationError, ExpectationLike, parse_expectation
 from .skills import (
     ClickSkill,
@@ -73,14 +74,21 @@ _SKILL_FIELDS = {
     PressSkill.TYPE: {"name", "type", "key", "enabled", "expect"},
     HoldSkill.TYPE: {"name", "type", "key", "seconds", "enabled", "expect"},
 }
-_RULE_FIELDS = {
+_COMMON_RULE_FIELDS = {
     "name",
-    "detector",
     "skill",
-    "min_confidence",
     "max_observation_age_seconds",
     "cooldown_seconds",
     "enabled",
+}
+_DETECTOR_RULE_FIELDS = _COMMON_RULE_FIELDS | {"detector", "min_confidence"}
+_METER_RULE_FIELDS = _COMMON_RULE_FIELDS | {
+    "meter",
+    "below",
+    "above",
+    "rises",
+    "falls",
+    "min_confidence",
 }
 
 
@@ -131,9 +139,9 @@ class MeterDefinition:
 
 @dataclass(frozen=True, slots=True)
 class RuleDefinition:
-    """A rule that fires a skill, plus whether it starts enabled."""
+    """A detector/meter rule that fires a skill, plus its initial enabled state."""
 
-    rule: VisibilityRule
+    rule: Rule
     enabled: bool = True
 
 
@@ -240,6 +248,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
     rules = _parse_rules(
         _require_list(top.get("rules", []), "rules"),
         detector_names,
+        meter_names,
         {skill.name for skill in skills},
     )
     try:
@@ -488,21 +497,33 @@ _SKILL_CLASSES: dict[str, type] = {
 
 
 def _parse_rules(
-    items: list[object], detector_names: set[str], skill_names: set[str]
+    items: list[object],
+    detector_names: set[str],
+    meter_names: set[str],
+    skill_names: set[str],
 ) -> tuple[RuleDefinition, ...]:
     rules: list[RuleDefinition] = []
     seen: set[str] = set()
+
     for index, item in enumerate(items):
         label = f"rules[{index}]"
         block = _require_object(item, label)
-        _reject_unknown(block, _RULE_FIELDS, label)
         name = _require_name(block.get("name"), f"{label}.name")
         if name in seen:
             raise ProfileError(f"Duplicate rule name: {name}")
         seen.add(name)
-        detector = block.get("detector")
-        if not isinstance(detector, str) or detector not in detector_names:
-            raise ProfileError(f"Rule {name!r} references unknown detector {detector!r}.")
+
+        has_detector = "detector" in block
+        has_meter = "meter" in block
+        if not has_detector and not has_meter:
+            raise ProfileError(
+                f"Rule {name!r} must reference exactly one detector or meter."
+            )
+        if has_detector and has_meter:
+            raise ProfileError(
+                f"Rule {name!r} cannot reference both a detector and a meter."
+            )
+
         skill = block.get("skill")
         if not isinstance(skill, str) or skill not in skill_names:
             raise ProfileError(f"Rule {name!r} references unknown skill {skill!r}.")
@@ -510,25 +531,60 @@ def _parse_rules(
         if not isinstance(enabled, bool):
             raise ProfileError(f"Rule {name!r}: 'enabled' must be true or false.")
 
-        options: dict[str, float] = {}
-        if "min_confidence" in block:
-            options["min_confidence"] = _require_unit_interval(
-                block["min_confidence"], f"Rule {name!r} min_confidence"
-            )
+        common: dict[str, float] = {}
         for field in ("max_observation_age_seconds", "cooldown_seconds"):
             if field in block:
-                options[field] = _require_non_negative(block[field], f"Rule {name!r} {field}")
-        try:
-            rule = VisibilityRule(
-                name=name,
-                detector_name=detector,
-                action=SKILL_RULE_ACTION,
-                skill=skill,
-                **options,
-            )
-        except ValueError as error:
-            raise ProfileError(f"Rule {name!r}: {error}") from error
+                common[field] = _require_non_negative(
+                    block[field], f"Rule {name!r} {field}"
+                )
+
+        if has_detector:
+            _reject_unknown(block, _DETECTOR_RULE_FIELDS, label)
+            detector = block.get("detector")
+            if not isinstance(detector, str) or detector not in detector_names:
+                raise ProfileError(
+                    f"Rule {name!r} references unknown detector {detector!r}."
+                )
+            options = dict(common)
+            if "min_confidence" in block:
+                options["min_confidence"] = _require_unit_interval(
+                    block["min_confidence"],
+                    f"Rule {name!r} min_confidence",
+                )
+            try:
+                rule: Rule = VisibilityRule(
+                    name=name,
+                    detector_name=detector,
+                    action=SKILL_RULE_ACTION,
+                    skill=skill,
+                    **options,
+                )
+            except ValueError as error:
+                raise ProfileError(f"Rule {name!r}: {error}") from error
+        else:
+            _reject_unknown(block, _METER_RULE_FIELDS, label)
+            condition_block = {
+                key: block[key]
+                for key in ("meter", "below", "above", "rises", "falls", "min_confidence")
+                if key in block
+            }
+            try:
+                condition = parse_meter_condition(
+                    condition_block,
+                    meter_names,
+                    label=f"Rule {name!r}",
+                )
+                rule = MeterRule(
+                    name=name,
+                    condition=condition,
+                    skill=skill,
+                    **common,
+                )
+            except (MeterConditionError, ValueError) as error:
+                raise ProfileError(f"Rule {name!r}: {error}") from error
+
         rules.append(RuleDefinition(rule, enabled))
+
     return tuple(rules)
 
 
@@ -705,6 +761,7 @@ def _validate_before_write(
     _parse_rules(
         list(data["rules"]),  # type: ignore[arg-type]
         set(names),
+        meter_names,
         {skill.name for skill in skills},
     )
     try:
@@ -781,8 +838,21 @@ def _skill_block(
 
 def _rule_block(definition: RuleDefinition) -> dict[str, object]:
     rule = definition.rule
+    if isinstance(rule, MeterRule):
+        block: dict[str, object] = {
+            "name": rule.name,
+            "skill": rule.skill,
+            "max_observation_age_seconds": rule.max_observation_age_seconds,
+            "cooldown_seconds": rule.cooldown_seconds,
+            "enabled": definition.enabled,
+        }
+        block.update(rule.condition.to_block())
+        return block
+
     if rule.action != SKILL_RULE_ACTION or rule.skill is None:
-        raise ProfileError(f"Rule {rule.name!r} must fire a skill to be saved in a profile.")
+        raise ProfileError(
+            f"Rule {rule.name!r} must fire a skill to be saved in a profile."
+        )
     return {
         "name": rule.name,
         "detector": rule.detector_name,
