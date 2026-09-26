@@ -93,6 +93,28 @@ class PreflightTests(unittest.TestCase):
         self.assertTrue(all(line.startswith("[NOTE]") for line in notes))
 
 
+    def test_declared_meter_without_reading_is_an_advisory_note(self) -> None:
+        report = run_preflight(
+            _facts(declared_meters=("hp",), available_meters=())
+        )
+
+        self.assertTrue(report.ready)
+        self.assertEqual(report.summary(), "Ready (check: Meters)")
+        meter = [check for check in report.checks if check.name == "Meters"][0]
+        self.assertTrue(meter.line().startswith("[NOTE]"))
+        self.assertIn("waiting for accepted reading: hp", meter.detail)
+
+    def test_declared_meter_with_accepted_reading_is_ok(self) -> None:
+        report = run_preflight(
+            _facts(declared_meters=("hp",), available_meters=("hp",))
+        )
+
+        self.assertTrue(report.ready)
+        self.assertEqual(report.summary(), "Ready")
+        meter = [check for check in report.checks if check.name == "Meters"][0]
+        self.assertTrue(meter.line().startswith("[OK]"))
+
+
 class RunBudgetTests(unittest.TestCase):
     def test_remaining_and_expiry(self) -> None:
         budget = RunBudget(max_seconds=60.0, started_at=100.0)
