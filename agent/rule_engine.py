@@ -133,12 +133,20 @@ class RuleEngine:
     def enable_rule(self, name: str) -> None:
         with self._lock:
             self._require_known_rule(name)
+            was_disabled = name in self._disabled_rule_names
             self._disabled_rule_names.discard(name)
+            if was_disabled:
+                # A change rule must establish a fresh baseline after being
+                # re-enabled; it must not react to movement that happened
+                # while the rule was disabled.
+                self._meter_baselines.pop(name, None)
 
     def disable_rule(self, name: str) -> None:
         with self._lock:
             self._require_known_rule(name)
             self._disabled_rule_names.add(name)
+            # Disabled change rules do not accumulate/retain observation state.
+            self._meter_baselines.pop(name, None)
 
     def is_rule_enabled(self, name: str) -> bool:
         with self._lock:
