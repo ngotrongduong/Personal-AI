@@ -30,11 +30,11 @@ Merged with green Windows CI:
   across disable/re-enable.
 
 Current work:
-- PR #98 / `codex/v1.1-preserve-meters-on-save`: Save/Save As must preserve
-  a loaded profile's meter definitions. This regression was found in the
-  cross-task self-audit and has a UI test.
-- `codex/v1.1-meter-tools`: Task 5 read-only `scripts/meters.py suggest|test`,
-  USER_GUIDE meter calibration section and example. Sync after PR #98, then CI.
+- PR #98 merged: Save/Save As now preserves a loaded profile's meter definitions,
+  with a UI regression test.
+- PR #99 / `codex/v1.1-meter-tools`: Task 5 read-only `scripts/meters.py suggest|test`,
+  USER_GUIDE meter calibration section and example. Self-audit added strict
+  generated-option validation and clipped-ROI rejection. Awaiting Windows CI/merge.
 - Task 4 live `main.py` measurement/prompt/preflight wiring and Task 6 Windows
   smoke test remain the machine-access lane. Task 4 must capture a fresh
   accepted meter baseline at skill completion for `expect.rises/falls`.
@@ -505,15 +505,14 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Active v1.1 work
 
-- Task 0 kickoff merged via PR #93; draft release PR #94 tracks `feature/v1.1-meters -> main`.
-- Task 1 merged via PR #95 with green Windows CI.
-- Task 2 merged via PR #96 with green Windows CI.
-- Task 3 is implemented on `codex/v1.1-meter-rules`: fail-closed `MeterRule`, consecutive accepted-sample change semantics, cooldown/freshness, profile parse/save and dedicated tests. Awaiting CI/merge.
-- Machine-only live wiring/smoke testing remains in Claude's lane.
+- Tasks 0-3 are merged: PRs #93, #95, #96 and #97.
+- The profile Save/Save As meter-preservation regression found in self-audit was fixed by PR #98.
+- Task 5 is PR #99 and is awaiting Windows CI/merge.
+- Task 4 live wiring and Task 6 live Windows smoke testing remain in Claude's machine-access lane.
 
 ### Next task
 
-Merge Task 3 after green CI. Then pure work can move to Task 5 tooling/docs while Task 4 live wiring remains the machine-access lane.
+Merge PR #99 after green CI. Then the remaining implementation dependency is Task 4 live wiring; Task 6 validates the completed milestone on Windows.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
