@@ -16,7 +16,9 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-25)
+## Right now (2026-09-26)
+
+**v1.1 "Meters" (Issue #92) is now the active milestone.** The integration branch is `feature/v1.1-meters`, created from the v1.0.0 `main` head. Task 0 kickoff is being prepared on `codex/v1.1-kickoff`; no meter production code has landed yet. See `docs/PLAN.md` for the v1.1 design constraint, tasks and acceptance criteria.
 
 **v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
 branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge
@@ -482,10 +484,7 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-None scheduled. v1.0 is released. The next milestone needs scoping first:
-open an issue, create a `feature/<milestone>` branch from `main`, and write
-its spec with a design constraint and acceptance criteria in
-`docs/PLAN.md`. Candidates are in `docs/ROADMAP.md` "Next".
+Complete v1.1 Task 0, then start Task 1 (profile `meters` block) and Task 2 (pure meter conditions) on separate sub-branches. Machine-only live wiring/smoke testing stays in Claude's lane.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -521,8 +520,9 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-None. Issue #82 (v1.0), Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
-Issue #1 (v0.3) and Issue #4 are all completed and closed.
+- **#92 — v1.1 Meters** (active).
+
+Issue #82 (v1.0), #71 (v0.8), #61 (v0.7), #50 (v0.6), #41 (v0.5), #15 (v0.4), #13 (old v0.4 model-foundation tracker), #1 (v0.3) and #4 are closed.
 
 ## Lessons
 
