@@ -486,12 +486,13 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 - Task 0 kickoff merged via PR #93; draft release PR #94 tracks `feature/v1.1-meters -> main`.
 - Task 1 merged via PR #95 with green Windows CI.
-- Task 2 is implemented on `codex/v1.1-meter-conditions`: pure fail-closed meter conditions plus meter forms of `expect` / `stop_when`, with threshold/change baseline semantics and observation-boundary tests. Awaiting CI/merge.
+- Task 2 merged via PR #96 with green Windows CI.
+- Task 3 is implemented on `codex/v1.1-meter-rules`: fail-closed `MeterRule`, consecutive accepted-sample change semantics, cooldown/freshness, profile parse/save and dedicated tests. Awaiting CI/merge.
 - Machine-only live wiring/smoke testing remains in Claude's lane.
 
 ### Next task
 
-Merge Task 2 after green CI, then start Task 3 (`MeterRule`) on a fresh branch from `feature/v1.1-meters`.
+Merge Task 3 after green CI. Then pure work can move to Task 5 tooling/docs while Task 4 live wiring remains the machine-access lane.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
