@@ -15,6 +15,7 @@ from __future__ import annotations
 
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+import math
 import time
 from typing import Protocol
 
@@ -35,6 +36,8 @@ from .step_history import StepHistory
 
 
 MAX_GOAL_LENGTH = 500
+METER_PROMPT_MAX_AGE_SECONDS = 1.0
+METER_OBSERVATION_SOURCE = "vision:resource_bar"
 
 
 @dataclass(frozen=True, slots=True)
@@ -247,13 +250,45 @@ class LlmPlanner:
         return "\n".join(lines)
 
 
-def _format_observations(observations: dict[str, Observation]) -> list[str]:
+def _format_observations(
+    observations: dict[str, Observation],
+    *,
+    now: float | None = None,
+) -> list[str]:
     if not observations:
         return ["- none"]
-    return [
-        (
+
+    current = time.monotonic() if now is None else now
+    lines: list[str] = []
+    for name, observation in observations.items():
+        if observation.source == METER_OBSERVATION_SOURCE:
+            value = observation.value
+            stale = (
+                observation.observed_at > current
+                or current - observation.observed_at > METER_PROMPT_MAX_AGE_SECONDS
+            )
+            valid_value = (
+                not isinstance(value, bool)
+                and isinstance(value, int | float)
+                and math.isfinite(value)
+                and 0.0 <= value <= 1.0
+            )
+            if observation.visible and valid_value and not stale:
+                percent = f"{float(value) * 100.0:.1f}".rstrip("0").rstrip(".")
+                lines.append(
+                    f"- {name}: {percent}% "
+                    f"(confidence={observation.confidence:.3f}, source={observation.source!r})"
+                )
+            else:
+                reason = "stale" if stale else "unavailable"
+                lines.append(
+                    f"- {name}: unavailable ({reason}, "
+                    f"confidence={observation.confidence:.3f}, source={observation.source!r})"
+                )
+            continue
+
+        lines.append(
             f"- {name}: visible={observation.visible}, confidence={observation.confidence:.3f}, "
             f"bbox={observation.bbox!r}, value={observation.value!r}, source={observation.source!r}"
         )
-        for name, observation in observations.items()
-    ]
+    return lines
