@@ -106,7 +106,7 @@ class MeterExpectationParseTests(unittest.TestCase):
                 {"meter": "hp", "detector": "done", "below": 0.2},
                 "exactly one",
             ),
-            ({"below": 0.2}, "exactly one"),
+            ({"below": 0.2}, "unknown detector"),
             ({"meter": "hp", "below": 0.2, "retry": True}, "unknown field"),
         ]
         for block, fragment in cases:
