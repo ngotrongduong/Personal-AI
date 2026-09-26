@@ -115,10 +115,22 @@
 - Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`: all 9
   acceptance criteria passed.
 
-## Next (after v1.0)
+## Active — v1.1 Meters (Issue #92)
 
-- Not planned yet. Candidates: multiple templates per detector, OCR,
-  color/HP-bar analysis and object detection.
+- Wire the existing HSV/ROI resource-bar measurement into game profiles as
+  named meters such as HP, mana, stamina or progress.
+- Expose normalized meter values through GameState and the planner prompt.
+- Add fail-closed meter conditions for expectations, stop conditions and rules:
+  `below`, `above`, `rises`, `falls`.
+- Meter rules may only choose declared skills and remain behind the existing
+  SkillExecutor / ActionDispatcher / InputController gates.
+- Add calibration/test tooling plus a harmless Windows meter demo.
+- OCR-based numeric meters are explicitly out of scope for v1.1.
+
+## Later
+
+- Multiple templates per detector and object detection.
+- OCR-based numeric meters if real games need them.
 - Imitation-learning experiments on recorded datasets remain a possible side
   track (offline training only; any replay goes through `ActionDispatcher`).
 
