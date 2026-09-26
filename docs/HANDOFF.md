@@ -485,13 +485,13 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 ### Active v1.1 work
 
 - Task 0 kickoff merged via PR #93; draft release PR #94 tracks `feature/v1.1-meters -> main`.
-- Task 1 is implemented on `codex/v1.1-profile-meters`: profile `meters` schema, strict validation, shared detector/meter observation namespace, save/load round-trip and tests. Awaiting CI/merge.
-- Task 2 (pure meter conditions) starts after Task 1 lands so it can build on the canonical profile meter type.
+- Task 1 merged via PR #95 with green Windows CI.
+- Task 2 is implemented on `codex/v1.1-meter-conditions`: pure fail-closed meter conditions plus meter forms of `expect` / `stop_when`, with threshold/change baseline semantics and observation-boundary tests. Awaiting CI/merge.
 - Machine-only live wiring/smoke testing remains in Claude's lane.
 
 ### Next task
 
-Merge Task 1 after green CI, then implement Task 2 (`agent/meter_conditions.py` and meter forms of `expect` / `stop_when`).
+Merge Task 2 after green CI, then start Task 3 (`MeterRule`) on a fresh branch from `feature/v1.1-meters`.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
