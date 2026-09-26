@@ -1492,6 +1492,7 @@ class PersonalGameAIApp:
                 self.profiles_dir,
                 name,
                 detectors=contents.detectors,
+                meters=self.profile.meters if self.profile is not None else (),
                 skills=contents.skills,
                 rules=contents.rules,
                 permissions=self.profile.permissions if self.profile is not None else None,
