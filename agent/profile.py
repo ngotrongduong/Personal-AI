@@ -28,7 +28,7 @@ from vision.resource_bar import Direction, HSVRange, ResourceBarSpec
 from .agent_session import check_goal_detector
 from .planner_config import PlannerConfig, load_planner_config
 from .rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
-from .skill_effects import Expectation, ExpectationError, parse_expectation
+from .skill_effects import ExpectationError, ExpectationLike, parse_expectation
 from .skills import (
     ClickSkill,
     HoldSkill,
@@ -148,7 +148,7 @@ class GameProfile:
     planner: PlannerConfig
     # Skill name -> observed effect it should have (v1.0). Observation only:
     # nothing on the input path reads it.
-    expectations: Mapping[str, Expectation] = field(
+    expectations: Mapping[str, ExpectationLike] = field(
         default_factory=lambda: MappingProxyType({})
     )
     meters: tuple[MeterDefinition, ...] = ()
@@ -229,7 +229,9 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
             f"Detector and meter names share one observation namespace; duplicate name(s): {joined}."
         )
     skills, expectations = _parse_skills(
-        _require_list(top.get("skills", []), "skills"), detector_names
+        _require_list(top.get("skills", []), "skills"),
+        detector_names,
+        meter_names,
     )
     try:
         SkillBook(skills, permissions)
@@ -242,7 +244,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
     )
     try:
         planner = load_planner_config(top)
-        check_goal_detector(planner.stop_when, detector_names)
+        check_goal_detector(planner.stop_when, detector_names, meter_names)
     except (TypeError, ValueError) as error:
         raise ProfileError(f"Invalid planner block: {error}") from error
 
@@ -430,12 +432,14 @@ def _parse_roi(value: object, label: str) -> tuple[int, int, int, int] | None:
 
 
 def _parse_skills(
-    items: list[object], detector_names: set[str]
-) -> tuple[tuple[Skill, ...], dict[str, Expectation]]:
+    items: list[object],
+    detector_names: set[str],
+    meter_names: set[str] | None = None,
+) -> tuple[tuple[Skill, ...], dict[str, ExpectationLike]]:
     """The skills, plus each skill's optional `expect` parsed separately."""
 
     skills: list[Skill] = []
-    expectations: dict[str, Expectation] = {}
+    expectations: dict[str, ExpectationLike] = {}
     seen: set[str] = set()
     for index, item in enumerate(items):
         label = f"skills[{index}]"
@@ -453,7 +457,11 @@ def _parse_skills(
 
         if "expect" in block:
             try:
-                expectations[name] = parse_expectation(block["expect"], detector_names)
+                expectations[name] = parse_expectation(
+                    block["expect"],
+                    detector_names,
+                    meter_names or set(),
+                )
             except ExpectationError as error:
                 raise ProfileError(f"Skill {name!r}: {error}") from error
         options = {key: block[key] for key in block if key not in ("type", "expect")}
@@ -579,7 +587,7 @@ def save_profile(
     rules: Iterable[RuleDefinition] = (),
     permissions: SkillPermissions | None = None,
     planner: PlannerConfig | None = None,
-    expectations: Mapping[str, Expectation] | None = None,
+    expectations: Mapping[str, ExpectationLike] | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Write a new profile folder under `root` and return its path.
@@ -685,7 +693,11 @@ def _validate_before_write(
         )
 
     permissions = _parse_permissions(data["permissions"])
-    skills, _ = _parse_skills(list(data["skills"]), set(names))  # type: ignore[arg-type]
+    skills, _ = _parse_skills(
+        list(data["skills"]),  # type: ignore[arg-type]
+        set(names),
+        meter_names,
+    )
     try:
         SkillBook(skills, permissions)
     except SkillError as error:
@@ -696,7 +708,11 @@ def _validate_before_write(
         {skill.name for skill in skills},
     )
     try:
-        check_goal_detector(load_planner_config(data).stop_when, set(names))
+        check_goal_detector(
+            load_planner_config(data).stop_when,
+            set(names),
+            meter_names,
+        )
     except (TypeError, ValueError) as error:
         raise ProfileError(f"Invalid planner block: {error}") from error
 
@@ -733,7 +749,7 @@ def _meter_block(meter: MeterDefinition) -> dict[str, object]:
 
 
 def _skill_block(
-    skill: Skill, expectations: Mapping[str, Expectation] | None = None
+    skill: Skill, expectations: Mapping[str, ExpectationLike] | None = None
 ) -> dict[str, object]:
     block: dict[str, object]
     if isinstance(skill, ClickSkill):
