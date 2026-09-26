@@ -1,0 +1,52 @@
+{
+  "format_version": 1,
+  "name": "Meter example - adjust ROI and HSV before use",
+  "permissions": {
+    "allowed_keys": ["h"],
+    "max_hold_seconds": 1.0,
+    "max_actions_per_second": 3
+  },
+  "detectors": [],
+  "meters": [
+    {
+      "name": "hp",
+      "roi": [20, 30, 220, 16],
+      "hsv_ranges": [
+        {
+          "lower": [50, 180, 120],
+          "upper": [80, 255, 255]
+        }
+      ],
+      "direction": "left_to_right",
+      "min_slice_coverage": 0.5,
+      "max_gap_slices": 1,
+      "min_confidence": 0.8
+    }
+  ],
+  "skills": [
+    {
+      "name": "heal",
+      "type": "press",
+      "key": "h",
+      "enabled": false,
+      "expect": {
+        "meter": "hp",
+        "rises": 0.15,
+        "within_seconds": 3.0,
+        "min_confidence": 0.8
+      }
+    }
+  ],
+  "rules": [],
+  "planner": {
+    "enabled": false,
+    "model": "qwen3.5:9b",
+    "goal": "Keep HP healthy.",
+    "max_run_minutes": 15,
+    "stop_when": {
+      "meter": "hp",
+      "above": 0.95,
+      "min_confidence": 0.8
+    }
+  }
+}
