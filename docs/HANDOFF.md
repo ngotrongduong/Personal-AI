@@ -16,9 +16,30 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-26)
+## Right now (2026-09-27)
 
-**v1.1 "Meters" (Issue #92) is now the active milestone.** The integration branch is `feature/v1.1-meters`, created from the v1.0.0 `main` head. Task 0 kickoff is being prepared on `codex/v1.1-kickoff`; no meter production code has landed yet. See `docs/PLAN.md` for the v1.1 design constraint, tasks and acceptance criteria.
+**v1.1 "Meters" (Issue #92) is the active milestone** on
+`feature/v1.1-meters`; draft release PR #94 tracks integration into `main`.
+
+Merged with green Windows CI:
+- Task 0 kickoff — PR #93.
+- Task 1 profile `meters` schema — PR #95.
+- Task 2 pure fail-closed meter conditions plus meter `expect` / `stop_when` — PR #96.
+- Task 3 `MeterRule` plus profile rules — PR #97. Final audit fixes include
+  exact floating-point delta boundaries and resetting a change-rule baseline
+  across disable/re-enable.
+
+Current work:
+- PR #98 / `codex/v1.1-preserve-meters-on-save`: Save/Save As must preserve
+  a loaded profile's meter definitions. This regression was found in the
+  cross-task self-audit and has a UI test.
+- `codex/v1.1-meter-tools`: Task 5 read-only `scripts/meters.py suggest|test`,
+  USER_GUIDE meter calibration section and example. Sync after PR #98, then CI.
+- Task 4 live `main.py` measurement/prompt/preflight wiring and Task 6 Windows
+  smoke test remain the machine-access lane. Task 4 must capture a fresh
+  accepted meter baseline at skill completion for `expect.rises/falls`.
+
+Do not duplicate Tasks 1–3 or Task 5 without checking the active branches/PRs.
 
 **v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
 branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge

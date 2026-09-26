@@ -156,9 +156,9 @@ Existing detector forms remain valid and unchanged.
 | 0 | Kickoff | Done | ChatGPT (PR #93) | Issue #92, active integration branch, PLAN/invariant/HANDOFF/ROADMAP and draft release PR #94 are in place. |
 | 1 | Profile `meters` block | Done | ChatGPT (PR #95) | `MeterDefinition`, strict HSV/ROI/direction/confidence validation, save/load round-trip, detector/meter shared namespace rejection, dedicated tests; green Windows CI. |
 | 2 | Meter conditions | Done | ChatGPT (PR #96) | Pure fail-closed meter conditions; threshold/change operators; meter forms of `expect` and `stop_when`; effect/goal baselines; profile round-trip; observation-boundary tests; green Windows CI. |
-| 3 | `MeterRule` | Implementation complete — pending CI/merge | ChatGPT (`codex/v1.1-meter-rules`) | Skill-only `MeterRule`; cooldown/freshness; threshold rules; consecutive valid-sample `rises`/`falls`; stale-gap reset; profile parse/save; tests. |
+| 3 | `MeterRule` | Done | ChatGPT (PR #97) | Skill-only rule; cooldown/freshness; consecutive accepted-sample change logic; float-boundary fix; baseline reset across disable/re-enable; green Windows CI. |
 | 4 | Live wiring | Not started | Claude/machine lane | Measure each vision tick, status line, planner prompt, preflight note; safety review. |
-| 5 | Meter tools/docs | Not started | Unassigned | `scripts/meters.py suggest|test`, USER_GUIDE and example. |
+| 5 | Meter tools/docs | In progress | ChatGPT (`codex/v1.1-meter-tools`) | Read-only `suggest`/`test`, USER_GUIDE and example implemented; self-audit tightened validation and clipped-ROI handling; pending sync/CI. |
 | 6 | Windows smoke test | Not started | Claude/machine lane | `scripts/meter_demo.py`; run all acceptance criteria. |
 | R | Release v1.1.0 | Not started | Shared | CHANGELOG/README/ROADMAP/ARCHITECTURE/version, green CI, release PR merge commit. |
 
