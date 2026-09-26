@@ -32,12 +32,9 @@ Merged with green Windows CI:
 Current work:
 - PR #98 merged: Save/Save As now preserves a loaded profile's meter definitions,
   with a UI regression test.
-- PR #99 / `codex/v1.1-meter-tools`: Task 5 read-only `scripts/meters.py suggest|test`,
-  USER_GUIDE meter calibration section and example. Self-audit added strict
-  generated-option validation and clipped-ROI rejection. Awaiting Windows CI/merge.
-- Task 4 live `main.py` measurement/prompt/preflight wiring and Task 6 Windows
-  smoke test remain the machine-access lane. Task 4 must capture a fresh
-  accepted meter baseline at skill completion for `expect.rises/falls`.
+- Task 5 merged via PR #99 with green Windows CI: read-only `scripts/meters.py suggest|test`, USER_GUIDE calibration docs and examples.
+- `codex/v1.1-meter-demo` prepares the harmless Task 6 smoke target, matching meter-only profile and synthetic geometry/profile tests. The live Windows run remains Claude's lane.
+- Task 4 live `main.py` measurement/prompt/preflight wiring remains the machine-access lane. It must capture a fresh accepted meter baseline at skill completion for `expect.rises/falls`.
 
 Do not duplicate Tasks 1–3 or Task 5 without checking the active branches/PRs.
 
@@ -507,12 +504,12 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 - Tasks 0-3 are merged: PRs #93, #95, #96 and #97.
 - The profile Save/Save As meter-preservation regression found in self-audit was fixed by PR #98.
-- Task 5 is PR #99 and is awaiting Windows CI/merge.
-- Task 4 live wiring and Task 6 live Windows smoke testing remain in Claude's machine-access lane.
+- Task 5 merged via PR #99 with green Windows CI.
+- `codex/v1.1-meter-demo` is preparing the Task 6 test harness; Task 4 live wiring and the actual Task 6 Windows smoke run remain Claude's machine-access lane.
 
 ### Next task
 
-Merge PR #99 after green CI. Then the remaining implementation dependency is Task 4 live wiring; Task 6 validates the completed milestone on Windows.
+Merge the meter-demo helper after green CI. The remaining runtime dependency is Task 4 live wiring; then Claude runs Task 6 against the demo and records the 9 acceptance results.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
