@@ -162,15 +162,31 @@ def condition_matches_value(
     *,
     baseline: float | None = None,
 ) -> bool:
-    if condition.operator == "below":
-        return value < condition.amount
-    if condition.operator == "above":
-        return value > condition.amount
-    if baseline is None:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int | float)
+        or not math.isfinite(value)
+        or not 0.0 <= value <= 1.0
+    ):
         return False
+    normalized_value = float(value)
+
+    if condition.operator == "below":
+        return normalized_value < condition.amount
+    if condition.operator == "above":
+        return normalized_value > condition.amount
+    if (
+        baseline is None
+        or isinstance(baseline, bool)
+        or not isinstance(baseline, int | float)
+        or not math.isfinite(baseline)
+        or not 0.0 <= baseline <= 1.0
+    ):
+        return False
+    normalized_baseline = float(baseline)
     if condition.operator == "rises":
-        return value - baseline >= condition.amount
-    return baseline - value >= condition.amount
+        return normalized_value - normalized_baseline >= condition.amount
+    return normalized_baseline - normalized_value >= condition.amount
 
 
 def meter_condition_met(
