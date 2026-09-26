@@ -8,6 +8,8 @@ from typing import Mapping
 from .agent_session import (
     DEFAULT_MAX_RUN_MINUTES,
     GoalCondition,
+    GoalConditionLike,
+    MeterGoalCondition,
     parse_goal_condition,
     validate_max_run_minutes,
 )
@@ -36,12 +38,14 @@ class PlannerConfig:
     auto_max_steps: int = DEFAULT_AUTO_MAX_STEPS
     llm_notes: bool = False
     max_run_minutes: float = DEFAULT_MAX_RUN_MINUTES
-    stop_when: GoalCondition | None = None
+    stop_when: GoalConditionLike | None = None
 
     def __post_init__(self) -> None:
         validate_max_run_minutes(self.max_run_minutes)
-        if self.stop_when is not None and not isinstance(self.stop_when, GoalCondition):
-            raise ValueError("stop_when must be a GoalCondition.")
+        if self.stop_when is not None and not isinstance(
+            self.stop_when, (GoalCondition, MeterGoalCondition)
+        ):
+            raise ValueError("stop_when must be a detector or meter goal condition.")
         if not isinstance(self.llm_notes, bool):
             raise ValueError("llm_notes must be a boolean.")
         if not isinstance(self.goal, str):
