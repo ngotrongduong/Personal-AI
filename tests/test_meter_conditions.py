@@ -152,10 +152,12 @@ class MeterConditionEvaluationTests(unittest.TestCase):
             condition_matches_value(MeterCondition("hp", "above", 0.7), 0.7)
         )
 
-    def test_change_conditions_require_a_baseline(self) -> None:
+    def test_change_conditions_require_a_valid_baseline(self) -> None:
         rise = MeterCondition("hp", "rises", 0.2)
         fall = MeterCondition("hp", "falls", 0.2)
         self.assertFalse(condition_matches_value(rise, 0.8))
+        self.assertFalse(condition_matches_value(rise, 0.8, baseline=-0.1))
+        self.assertFalse(condition_matches_value(rise, 1.1, baseline=0.5))
         self.assertTrue(condition_matches_value(rise, 0.8, baseline=0.5))
         self.assertFalse(condition_matches_value(rise, 0.69, baseline=0.5))
         self.assertTrue(condition_matches_value(fall, 0.3, baseline=0.6))
