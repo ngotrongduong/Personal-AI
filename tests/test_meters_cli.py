@@ -9,6 +9,7 @@ from unittest.mock import patch
 import cv2
 import numpy as np
 
+from agent.profile import load_profile
 from scripts import meters as meter_cli
 
 
@@ -84,6 +85,29 @@ class MeterSuggestTests(unittest.TestCase):
         image = np.zeros((20, 20, 3), dtype=np.uint8)
         with self.assertRaisesRegex(meter_cli.MeterCliError, "leaves the image"):
             meter_cli.suggest_hsv_ranges(image, (10, 10, 20, 20))
+
+
+class MeterDocsExampleTests(unittest.TestCase):
+    def test_documented_meter_profile_example_loads(self) -> None:
+        source = (
+            Path(__file__).resolve().parents[1]
+            / "docs"
+            / "examples"
+            / "meter_profile.json"
+        )
+        data = json.loads(source.read_text(encoding="utf-8"))
+
+        with tempfile.TemporaryDirectory() as tmp:
+            folder = Path(tmp)
+            (folder / "profile.json").write_text(
+                json.dumps(data),
+                encoding="utf-8",
+            )
+            profile = load_profile(folder)
+
+        self.assertEqual([meter.name for meter in profile.meters], ["hp"])
+        self.assertIn("heal", profile.expectations)
+        self.assertIsNotNone(profile.planner.stop_when)
 
 
 class MeterCliCommandTests(unittest.TestCase):
