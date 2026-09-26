@@ -144,7 +144,11 @@ def parse_expectation(
 
     has_detector = "detector" in block
     has_meter = "meter" in block
-    if has_detector == has_meter:
+    if not has_detector and not has_meter:
+        # Preserve the v1.0 failure mode/message for an empty detector
+        # expectation; existing profiles/tests rely on this wording.
+        raise ExpectationError("expect references unknown detector None.")
+    if has_detector and has_meter:
         raise ExpectationError(
             "expect must contain exactly one of 'detector' or 'meter'."
         )
