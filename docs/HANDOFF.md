@@ -482,9 +482,16 @@ instead of retained at zero confidence — two regression tests added. Realistic
 digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-state`;
 64/64 tests pass, ruff clean on the merged branch.
 
+### Active v1.1 work
+
+- Task 0 kickoff merged via PR #93; draft release PR #94 tracks `feature/v1.1-meters -> main`.
+- Task 1 is implemented on `codex/v1.1-profile-meters`: profile `meters` schema, strict validation, shared detector/meter observation namespace, save/load round-trip and tests. Awaiting CI/merge.
+- Task 2 (pure meter conditions) starts after Task 1 lands so it can build on the canonical profile meter type.
+- Machine-only live wiring/smoke testing remains in Claude's lane.
+
 ### Next task
 
-Complete v1.1 Task 0, then start Task 1 (profile `meters` block) and Task 2 (pure meter conditions) on separate sub-branches. Machine-only live wiring/smoke testing stays in Claude's lane.
+Merge Task 1 after green CI, then implement Task 2 (`agent/meter_conditions.py` and meter forms of `expect` / `stop_when`).
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
