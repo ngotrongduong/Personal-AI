@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
+from unittest import mock
 
 import numpy as np
 
@@ -19,6 +20,7 @@ from scripts.meter_demo import (
     MeterDemoState,
     STEP_FRACTION,
     clamp_fraction,
+    prepare_windows,
 )
 from vision.resource_bar import measure_resource_bar
 
@@ -37,6 +39,25 @@ class MeterDemoStateTests(unittest.TestCase):
         for value in (True, float("nan"), float("inf"), -float("inf")):
             with self.subTest(value=value), self.assertRaises(ValueError):
                 clamp_fraction(value)  # type: ignore[arg-type]
+
+
+class MeterDemoWindowsSetupTests(unittest.TestCase):
+    def test_prepare_windows_sets_dpi_awareness_and_disables_ime(self) -> None:
+        import ctypes
+
+        windll = mock.Mock()
+        with mock.patch.object(ctypes, "windll", windll, create=True):
+            prepare_windows()
+        windll.shcore.SetProcessDpiAwareness.assert_called_once_with(1)
+        windll.imm32.ImmDisableIME.assert_called_once_with(0)
+
+    def test_prepare_windows_is_a_no_op_without_windll(self) -> None:
+        import ctypes
+
+        windll = mock.Mock()
+        windll.shcore.SetProcessDpiAwareness.side_effect = OSError("no shcore")
+        with mock.patch.object(ctypes, "windll", windll, create=True):
+            prepare_windows()
 
 
 class MeterDemoProfileTests(unittest.TestCase):

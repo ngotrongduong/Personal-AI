@@ -16,10 +16,11 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-27)
+## Right now (2026-09-28)
 
 **v1.1 "Meters" (Issue #92) is the active milestone** on
 `feature/v1.1-meters`; draft release PR #94 tracks integration into `main`.
+Only Task R (release) is left.
 
 Merged with green Windows CI:
 - Task 0 kickoff — PR #93.
@@ -35,17 +36,20 @@ Merged with green Windows CI:
 - Task 6 harness — PR #100: `scripts/meter_demo.py` plus the meter-only demo
   profile.
 
-Current work:
-- Task 4 live wiring on `claude/v1.1-live-wiring` (Claude, with the pure
-  `agent/meter_live.py` helpers and the prompt meter line written by Codex via
-  the Codex plugin). Every vision tick measures the profile's meters with the
-  detectors' timestamp. A clipped ROI or a measurement error makes that meter
-  invalid. The status line shows `hp=42%(0.97)` / `hp=?`, the prompt shows
-  `- hp: 42% (meter, …)`, and preflight has an advisory `Meters` note. A
-  `rises`/`falls` expect takes its baseline from a fresh accepted reading at
-  step end.
-- Next: Task 6 live Windows smoke test on `scripts/meter_demo.py` (Claude),
-  then Task R.
+- Task 4 live wiring — PR #102 (Claude, with `agent/meter_live.py` helpers
+  and the prompt meter line by Codex). Every vision tick measures the
+  profile's meters with the detectors' timestamp; a clipped ROI or a
+  measurement error makes that meter invalid (`hp=?`); prompt, status line
+  and an advisory preflight `Meters` note show confident fresh readings.
+- Task 6 live Windows smoke test (Claude, branch `claude/v1.1-smoke`):
+  46/46 checks, all 9 acceptance criteria passed — see `docs/PLAN.md`
+  "Smoke test results". `scripts/meter_demo.py` is now DPI aware and turns
+  its own IME off (a Vietnamese IME swallowed its keys).
+
+Next: Task R — CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS, `APP_VERSION`
+1.1.0 and the setup/check banners, then merge PR #94 as a merge commit.
+Before any live planner run, prewarm Ollama: a cold `qwen3.5:9b` load can
+exceed the planner timeout.
 
 Do not duplicate Tasks 1–3 or Task 5 without checking the active branches/PRs.
 

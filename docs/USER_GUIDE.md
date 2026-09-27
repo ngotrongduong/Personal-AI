@@ -279,7 +279,10 @@ python scripts/meter_demo.py
 ```
 
 The demo opens **Personal Game AI - Meter Demo** with one deterministic green
-HP bar. Its client-frame ROI is `[60, 80, 400, 32]`. The matching smoke-test
+HP bar. Its client-frame ROI is `[60, 80, 400, 32]`; the demo draws in
+physical pixels, so this holds at any Windows display scaling, and it turns
+the input method (IME) off for itself so a Vietnamese/CJK IME cannot swallow
+its keys. The matching smoke-test
 profile is `docs/examples/meter_demo_profile.json`; copy it into a local
 profile folder before loading it:
 

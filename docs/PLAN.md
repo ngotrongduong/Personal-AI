@@ -157,9 +157,9 @@ Existing detector forms remain valid and unchanged.
 | 1 | Profile `meters` block | Done | ChatGPT (PR #95) | `MeterDefinition`, strict HSV/ROI/direction/confidence validation, save/load round-trip, detector/meter shared namespace rejection, dedicated tests; green Windows CI. |
 | 2 | Meter conditions | Done | ChatGPT (PR #96) | Pure fail-closed meter conditions; threshold/change operators; meter forms of `expect` and `stop_when`; effect/goal baselines; profile round-trip; observation-boundary tests; green Windows CI. |
 | 3 | `MeterRule` | Done | ChatGPT (PR #97) | Skill-only rule; cooldown/freshness; consecutive accepted-sample change logic; float-boundary fix; baseline reset across disable/re-enable; green Windows CI. |
-| 4 | Live wiring | Done (this PR) | Claude + Codex plugin | Every vision tick measures meters (same timestamp as detectors, clipped ROI/error → invalid, per-meter isolation, logs on valid/invalid transitions). Status line `hp=42%(0.97)`/`hp=?`, prompt `- hp: 42% (meter, …)`/`unknown`, advisory preflight `Meters` note, fresh step-end baseline for `rises`/`falls` expects. Safety review fixes: a meter reading is never a visibility-rule/click-skill target and its name is refused for UI click rules/detectors; the prompt and status show only confident fresh readings; vision skips frozen frames after a capture error. |
+| 4 | Live wiring | Done (PR #102) | Claude + Codex plugin | Every vision tick measures meters (same timestamp as detectors, clipped ROI/error → invalid, per-meter isolation, logs on valid/invalid transitions). Status line `hp=42%(0.97)`/`hp=?`, prompt `- hp: 42% (meter, …)`/`unknown`, advisory preflight `Meters` note, fresh step-end baseline for `rises`/`falls` expects. Safety review fixes: a meter reading is never a visibility-rule/click-skill target and its name is refused for UI click rules/detectors; the prompt and status show only confident fresh readings; vision skips frozen frames after a capture error. |
 | 5 | Meter tools/docs | Done | ChatGPT (PR #99) | Read-only `suggest`/`test`, USER_GUIDE and example; strict generated-option validation; clipped-ROI rejection; synthetic tests; green Windows CI. |
-| 6 | Windows smoke test | Harness merged (PR #100); live run not done | ChatGPT helper + Claude/machine lane | `scripts/meter_demo.py` + matching meter-only example profile and synthetic geometry test are prepared; Claude must still run the 9 live acceptance criteria on Windows. |
+| 6 | Windows smoke test | Done (this PR) | ChatGPT helper (PR #100) + Claude | Live run on Windows 11 with `scripts/meter_demo.py` and Ollama `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed (see "Smoke test results"). The demo is now DPI aware and turns its own IME off. |
 | R | Release v1.1.0 | Not started | Shared | CHANGELOG/README/ROADMAP/ARCHITECTURE/version, green CI, release PR merge commit. |
 
 ## Acceptance criteria
@@ -182,6 +182,44 @@ Existing detector forms remain valid and unchanged.
 9. The Windows smoke test on `scripts/meter_demo.py` demonstrates live
    measurement, a threshold condition, a change condition, planner visibility
    and F8 behavior without introducing a new input path.
+
+## Smoke test results
+
+Run on 2026-09-28, Windows 11 at 150% display scaling, RTX 4070 Ti, Ollama
+`qwen3.5:9b`, against the `scripts/meter_demo.py` window only (no game, no
+user app received input). An in-process script drove the real app (capture,
+vision tick, rule engine, planner, executor, dispatcher, F8 hook) and
+approved each planner proposal. Result: **46/46 checks passed**.
+
+| # | Criterion | Result |
+|---|-----------|--------|
+| 1 | Round-trip and rejection | PASS — meters, meter rules, `expect` and `stop_when` round-trip unchanged; a bad HSV range, a rule or `expect` naming an unknown meter, and a detector/meter name collision are each rejected with one clear load error (the only 4 dialogs of the run). |
+| 2 | Live measurement | PASS — `hp` read 50% then followed the demo to 80% (confidence 1.00, source `vision:resource_bar`); status line `hp=80%(1.00)`. |
+| 3 | Fail closed | PASS — a ROI outside the frame reads `hp=?`; neither an invalid nor a stale reading fired the rule with input on; an invalid reading with the bar at 100% did not end a run with goal `hp above 95%`. |
+| 4 | Planner visibility | PASS — the prompt showed `- hp: 50% (meter, confidence 1.000)`, then the new level after each step, and `- hp: unknown (meter)` for the invalid meter; preflight showed `Meters: hp 50%`. |
+| 5 | `expect` | PASS — `heal` with `rises 0.1` was confirmed twice (50→70→90%); `damage` with `falls 0.1` at 0% was recorded `not seen`. |
+| 6 | `stop_when` | PASS — the third heal reached 100% and the run ended with `goal reached`. |
+| 7 | Meter rule | PASS — `hp below 30%` was BLOCKED with input off; with input on it started `heal` through the executor, 0→20→40%, the second firing 1.1 s later (cooldown 1 s), then stopped above the threshold. |
+| 8 | Baseline | PASS — a 2 s-old reading gave no baseline; a fresh one did. |
+| 9 | F8 | PASS — F8 turned input off, stopped the planner (`session_end` `emergency stop`); afterwards the meter rule fired nothing at 0% and no Ollama request was sent. |
+
+Findings fixed or recorded during the smoke test:
+
+- **An empty or wrong-color bar is a valid 0% reading**, not unknown. Only a
+  ROI clipped by the frame (or a measurement error) gives `hp=?`. The user
+  guide already tells users to check `scripts/meters.py test`.
+- **`scripts/meter_demo.py` was DPI unaware** — at 150% scaling Windows
+  bitmap-scaled the bar, so the example ROI missed it. The demo now calls
+  `SetProcessDpiAwareness(1)`.
+- **A Vietnamese IME swallowed the demo's keys** (H/D/digits sent to the Tk
+  window). The demo now disables its own IME with `ImmDisableIME(0)`.
+- **Windows' foreground lock** can refuse `SetForegroundWindow` for the smoke
+  script; the harness retries after a zero-distance mouse move (no key sent).
+  The app itself is unaffected: a user clicks the game window.
+- **Ollama:** the first load of `qwen3.5:9b` with little free RAM took over
+  4 minutes (longer than the planner timeout), and once the server stopped
+  answering after a cancelled request until restarted. Prewarm the model
+  (the preflight `Ollama` check only lists models) before a supervised run.
 
 ## Out of scope
 
