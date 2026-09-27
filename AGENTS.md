@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: none. v1.0 (`feature/v1.0-personal-agent`, Issue #82) merged into `main` as a merge commit at release. The next milestone gets a new `feature/<milestone>` branch.
+- Active integration branch: none right now. The last one, `feature/v1.1-meters` (Issue #92), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,6 +94,11 @@ feature/<milestone>
 
 ## Current priority
 
+v1.1 "Meters" (Issue #92) is released on `main`. It wires the existing
+resource-bar measurement into profiles, GameState, rules, expectations, stop
+conditions and the planner prompt. Meters are observation-only and fail closed
+on invalid/stale/low-confidence readings.
+
 v1.0 "Personal Game Agent" (Issue #82) is released on `main`. It closes the
 loop vision → state → plan → action → observation:
 - observed effects: a skill's optional `expect`, recorded as `confirmed` /
@@ -103,7 +108,7 @@ loop vision → state → plan → action → observation:
 - a user guide.
 
 Earlier steps: v0.6 profiles + skills, v0.7 a planner that picks skills, v0.8
-session memory (all released). No milestone after v1.0 is planned yet; see
+session memory (all released). No milestone after v1.1 is planned yet; see
 `docs/ROADMAP.md` for candidates. Scope a new milestone in `docs/PLAN.md`
 before implementing anything.
 
@@ -168,3 +173,11 @@ Recording invariant (permanent): recording only listens — it must never send i
 autonomous input control is enabled, and never record input while the game
 window is not foreground. See `docs/PLAN.md`'s design constraint section before
 implementing anything here.
+
+
+Meter invariant (permanent from v1.1):
+- Meters only read. Meter/profile/condition modules never import the input path.
+- A meter is declared by the loaded profile; the LLM never creates or edits meter definitions, thresholds or rules.
+- Meter observations use the existing GameState boundary. Invalid, stale or below-confidence measurements are false for every condition: no rule fires, no effect is confirmed and no goal is met.
+- Meter rules may only trigger an already-declared skill and still flow through SkillExecutor -> ActionDispatcher -> InputController; they never create keys, coordinates or hold durations.
+- Threshold/change conditions are bounded to normalized values in [0, 1] and must reference a declared meter.

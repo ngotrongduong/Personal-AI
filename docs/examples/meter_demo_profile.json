@@ -1,0 +1,76 @@
+{
+  "format_version": 1,
+  "name": "Meter Demo",
+  "permissions": {
+    "allowed_keys": ["d", "h"],
+    "max_hold_seconds": 1.0,
+    "max_actions_per_second": 3
+  },
+  "detectors": [],
+  "meters": [
+    {
+      "name": "hp",
+      "roi": [60, 80, 400, 32],
+      "hsv_ranges": [
+        {
+          "lower": [50, 180, 180],
+          "upper": [70, 255, 255]
+        }
+      ],
+      "direction": "left_to_right",
+      "min_slice_coverage": 0.5,
+      "max_gap_slices": 0,
+      "min_confidence": 0.8
+    }
+  ],
+  "skills": [
+    {
+      "name": "heal",
+      "type": "press",
+      "key": "h",
+      "enabled": false,
+      "expect": {
+        "meter": "hp",
+        "rises": 0.15,
+        "within_seconds": 2.0,
+        "min_confidence": 0.8
+      }
+    },
+    {
+      "name": "damage",
+      "type": "press",
+      "key": "d",
+      "enabled": false,
+      "expect": {
+        "meter": "hp",
+        "falls": 0.15,
+        "within_seconds": 2.0,
+        "min_confidence": 0.8
+      }
+    }
+  ],
+  "rules": [
+    {
+      "name": "heal_low_hp",
+      "meter": "hp",
+      "below": 0.25,
+      "skill": "heal",
+      "min_confidence": 0.8,
+      "max_observation_age_seconds": 0.75,
+      "cooldown_seconds": 1.0,
+      "enabled": true
+    }
+  ],
+  "planner": {
+    "enabled": false,
+    "model": "qwen3.5:9b",
+    "goal": "Keep HP healthy. Use heal when HP is low.",
+    "auto_max_steps": 3,
+    "max_run_minutes": 5,
+    "stop_when": {
+      "meter": "hp",
+      "above": 0.95,
+      "min_confidence": 0.8
+    }
+  }
+}

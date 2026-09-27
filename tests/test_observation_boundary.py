@@ -12,7 +12,12 @@ import unittest
 from tests.test_memory_boundary import ROOT, dynamic_imports, imported_modules, reachable_modules
 
 
-OBSERVATION_MODULES = ("agent/skill_effects.py", "agent/agent_session.py")
+OBSERVATION_MODULES = (
+    "agent/meter_conditions.py",
+    "agent/meter_live.py",
+    "agent/skill_effects.py",
+    "agent/agent_session.py",
+)
 FORBIDDEN = frozenset(
     {
         "agent.skills",

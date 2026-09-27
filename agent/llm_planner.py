@@ -13,12 +13,14 @@ runnable.
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass
 import time
 from typing import Protocol
 
 from .game_state import GameState, Observation
+from .meter_conditions import DEFAULT_METER_MIN_CONFIDENCE, METER_SOURCE, accepted_meter_value
+from .meter_live import meter_percent_text
 from .llm_planner_schema import (
     DirectiveValidationError,
     DisableRuleDirective,
@@ -35,6 +37,8 @@ from .step_history import StepHistory
 
 
 MAX_GOAL_LENGTH = 500
+# v1.1: a meter reading older than this is shown to the model as "unknown".
+METER_PROMPT_FRESH_SECONDS = 1.0
 
 
 @dataclass(frozen=True, slots=True)
@@ -119,8 +123,11 @@ class LlmPlanner:
         proposals: ProposalSink | None = None,
         notes: NotesView | None = None,
         note_sink: NoteSink | None = None,
+        meters: Mapping[str, float] | None = None,
     ) -> None:
         self._ollama_client = ollama_client
+        # v1.1: profile meter name -> min_confidence, for the prompt only.
+        self._meters = dict(meters or {})
         self._rule_engine = rule_engine
         self._skills = skills
         self._history = history
@@ -197,7 +204,7 @@ class LlmPlanner:
 
     def _build_prompt(self, state: GameState, runnable: Sequence[SkillSummary]) -> str:
         observations = state.snapshot()
-        observation_lines = _format_observations(observations)
+        observation_lines = _format_observations(observations, meter_min_confidence=self._meters)
         rule_lines = [
             f"- {rule.name}: {'enabled' if self._rule_engine.is_rule_enabled(rule.name) else 'disabled'}"
             for rule in self._rule_engine.rules
@@ -247,13 +254,42 @@ class LlmPlanner:
         return "\n".join(lines)
 
 
-def _format_observations(observations: dict[str, Observation]) -> list[str]:
+def _format_observations(
+    observations: dict[str, Observation],
+    *,
+    meter_min_confidence: Mapping[str, float] | None = None,
+    now: float | None = None,
+) -> list[str]:
     if not observations:
         return ["- none"]
+    current = time.monotonic() if now is None else now
+    thresholds = meter_min_confidence or {}
     return [
-        (
-            f"- {name}: visible={observation.visible}, confidence={observation.confidence:.3f}, "
-            f"bbox={observation.bbox!r}, value={observation.value!r}, source={observation.source!r}"
-        )
+        _format_observation(name, observation, thresholds, current)
         for name, observation in observations.items()
     ]
+
+
+def _format_observation(
+    name: str, observation: Observation, meter_min_confidence: Mapping[str, float], now: float
+) -> str:
+    if observation.source == METER_SOURCE:
+        # v1.1: a meter is shown as a percentage only when every meter
+        # condition would accept it (valid, confident, fresh); otherwise it is
+        # "unknown". Its definition stays in the profile.
+        value = accepted_meter_value(
+            observation,
+            min_confidence=meter_min_confidence.get(name, DEFAULT_METER_MIN_CONFIDENCE),
+            now=now,
+            max_age_seconds=METER_PROMPT_FRESH_SECONDS,
+        )
+        if value is None:
+            return f"- {name}: unknown (meter)"
+        return (
+            f"- {name}: {meter_percent_text(value)} "
+            f"(meter, confidence {observation.confidence:.3f})"
+        )
+    return (
+        f"- {name}: visible={observation.visible}, confidence={observation.confidence:.3f}, "
+        f"bbox={observation.bbox!r}, value={observation.value!r}, source={observation.source!r}"
+    )
