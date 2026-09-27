@@ -1,4 +1,4 @@
-# Personal Game AI v1.1.0
+# Personal Game AI v1.1.1
 
 Current release: **v1.1 — Meters**. New here? Start with
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), which goes from install to a first

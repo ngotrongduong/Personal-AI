@@ -2,6 +2,25 @@
 
 All notable project changes are tracked here.
 
+## v1.1.1 — High-DPI window fix
+
+Found while testing on a real game (Pixel Dungeon ML in Google Play Games)
+on a 4K monitor at 150% scale.
+
+- **Window fits high-DPI screens** (`main.py`, `fitted_window_size`): dxcam
+  makes the process per-monitor DPI aware, so Tk sizes are physical pixels.
+  The fixed `1220x900` window was far too small at 150%/200% scale and cut
+  off the preview, status and log, so Start Capture looked broken. The window
+  now scales with the Tk font scaling and is clamped to the screen.
+- **New layout**: the control panels sit in a vertically scrollable column on
+  the left; status, live preview and the safety log always stay visible on
+  the right. The column divider can be dragged.
+- **Covered-game warning** (`overlap_fraction`): capture reads a screen
+  region, so if this window overlaps the game, vision sees the app instead of
+  the game. The log now warns when the window starts or stops covering the
+  captured game.
+- Agent preflight text wraps at the panel width instead of a fixed width.
+
 ## v1.1.0 — Meters
 
 v1.1 lets a profile declare color-coded bars (HP, mana, stamina, progress) as

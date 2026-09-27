@@ -99,7 +99,7 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "1.1.0"
+APP_VERSION = "1.1.1"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
 PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
 PLANNER_MESSAGE_MAX_CHARS = 100
@@ -247,6 +247,42 @@ def _click_skill_for(rule: VisibilityRule, skills: list[Skill], skill_names: set
     return name
 
 
+BASE_WINDOW_SIZE = (1500, 900)
+BASE_MIN_SIZE = (780, 560)
+SCREEN_FILL = 0.92
+COVER_CHECK_SECONDS = 1.0
+COVER_WARN_FRACTION = 0.02
+
+
+def overlap_fraction(cover: tuple[int, int, int, int], target: tuple[int, int, int, int]) -> float:
+    """Share of ``target`` hidden by ``cover``; both are (left, top, right, bottom)."""
+    target_area = max(0, target[2] - target[0]) * max(0, target[3] - target[1])
+    if target_area == 0:
+        return 0.0
+    width = min(cover[2], target[2]) - max(cover[0], target[0])
+    height = min(cover[3], target[3]) - max(cover[1], target[1])
+    if width <= 0 or height <= 0:
+        return 0.0
+    return width * height / target_area
+
+
+def fitted_window_size(scaling: float, screen_w: int, screen_h: int) -> tuple[int, int, int, int]:
+    """Window and minimum size in physical pixels for a Tk ``scaling`` value.
+
+    Tk at 96 DPI reports a scaling of 96/72; higher Windows scale settings
+    raise it, so the layout is grown by the same factor and then clamped to
+    the screen.
+    """
+    factor = max(1.0, scaling / (96 / 72))
+    max_w = max(1, int(screen_w * SCREEN_FILL))
+    max_h = max(1, int(screen_h * SCREEN_FILL))
+    width = min(int(BASE_WINDOW_SIZE[0] * factor), max_w)
+    height = min(int(BASE_WINDOW_SIZE[1] * factor), max_h)
+    min_w = min(int(BASE_MIN_SIZE[0] * factor), width)
+    min_h = min(int(BASE_MIN_SIZE[1] * factor), height)
+    return width, height, min_w, min_h
+
+
 def _format_duration(seconds: float) -> str:
     total = max(0, int(seconds))
     hours, rest = divmod(total, 3600)
@@ -321,8 +357,7 @@ class PersonalGameAIApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title(f"Personal Game AI v{APP_VERSION}")
-        self.root.geometry("1220x900")
-        self.root.minsize(940, 700)
+        self._fit_window_to_screen()
 
         self.base_dir = Path(__file__).resolve().parent
         self.templates_dir = self.base_dir / "templates"
@@ -372,6 +407,9 @@ class PersonalGameAIApp:
         self.latest_match: MatchResult | None = None
 
         self._closing = False
+        # Capture grabs a screen region, so this window must not cover it.
+        self._last_cover_check = 0.0
+        self._game_covered = False
         self._last_vision_time = 0.0
         self._vision_interval = 0.10  # 10 Hz template matching
 
@@ -532,9 +570,68 @@ class PersonalGameAIApp:
 
     # ---------------- UI ----------------
 
+    def _fit_window_to_screen(self):
+        # dxcam makes the process per-monitor DPI aware, so Tk sizes are
+        # physical pixels while fonts follow the Windows scale (150%, 200%…).
+        # Scale the window with the fonts and keep it inside the screen.
+        width, height, min_w, min_h = fitted_window_size(
+            float(self.root.tk.call("tk", "scaling")),
+            self.root.winfo_screenwidth(),
+            self.root.winfo_screenheight(),
+        )
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(min_w, min_h)
+
+    def _scrollable_column(self, parent) -> ttk.Frame:
+        """A vertically scrollable frame, so every panel stays reachable."""
+        background = ttk.Style().lookup("TFrame", "background") or None
+        canvas = tk.Canvas(parent, highlightthickness=0, borderwidth=0, background=background)
+        scrollbar = ttk.Scrollbar(parent, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side="right", fill="y")
+        canvas.pack(side="left", fill="both", expand=True)
+        inner = ttk.Frame(canvas)
+        window = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+        def inner_changed(_event):
+            canvas.configure(
+                scrollregion=canvas.bbox("all"), width=inner.winfo_reqwidth()
+            )
+
+        def canvas_changed(event):
+            canvas.itemconfigure(window, width=event.width)
+
+        def wheel(event):
+            if canvas.yview() != (0.0, 1.0):
+                canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        inner.bind("<Configure>", inner_changed)
+        canvas.bind("<Configure>", canvas_changed)
+        # Wheel scrolls the column only while the pointer is over it.
+        inner.bind("<Enter>", lambda _e: canvas.bind_all("<MouseWheel>", wheel))
+        inner.bind("<Leave>", lambda _e: canvas.unbind_all("<MouseWheel>"))
+        return inner
+
     def _build_ui(self):
-        outer = ttk.Frame(self.root, padding=12)
-        outer.pack(fill="both", expand=True)
+        root_frame = ttk.Frame(self.root, padding=12)
+        root_frame.pack(fill="both", expand=True)
+
+        header = ttk.Frame(root_frame)
+        header.pack(fill="x")
+        body = ttk.PanedWindow(root_frame, orient="horizontal")
+        body.pack(fill="both", expand=True, pady=(6, 0))
+        panels_host = ttk.Frame(body)
+        live = ttk.Frame(body, padding=(8, 0, 0, 0))
+        body.add(panels_host, weight=3)
+        body.add(live, weight=2)
+        # Controls scroll on the left; status, preview and log stay visible
+        # on the right whatever the window height.
+        outer = self._scrollable_column(panels_host)
+        self._build_header(header)
+        self._build_panels(outer)
+        self._build_live_view(live)
+
+    def _build_header(self, outer):
 
         top = ttk.Frame(outer)
         top.pack(fill="x")
@@ -567,6 +664,7 @@ class PersonalGameAIApp:
             controls, text="EMERGENCY STOP (F8)", command=self.emergency_stop
         ).pack(side="right")
 
+    def _build_panels(self, outer):
         profile_box = ttk.LabelFrame(
             outer, text="Profile — detectors, skills and rules saved per game (load only with input control off)"
         )
@@ -723,9 +821,15 @@ class PersonalGameAIApp:
             agent_row, text="Stop Agent", command=self.stop_agent
         ).pack(side="left", padx=(4, 10))
         ttk.Label(agent_row, textvariable=self.agent_status_var).pack(side="left")
-        ttk.Label(
-            agent_box, textvariable=self.agent_checks_var, wraplength=1150, justify="left"
-        ).pack(anchor="w", padx=8, pady=(0, 2))
+        checks_label = ttk.Label(
+            agent_box, textvariable=self.agent_checks_var, wraplength=600, justify="left"
+        )
+        checks_label.pack(fill="x", padx=8, pady=(0, 2))
+        # Wrap at the panel width, whatever the window size and DPI.
+        agent_box.bind(
+            "<Configure>",
+            lambda event: checks_label.configure(wraplength=max(200, event.width - 24)),
+        )
         ttk.Label(
             agent_box, textvariable=self.agent_run_var
         ).pack(anchor="w", padx=8, pady=(0, 7))
@@ -899,6 +1003,7 @@ class PersonalGameAIApp:
         ).pack(anchor="w", padx=8, pady=(0, 7))
         self._refresh_recording_controls()
 
+    def _build_live_view(self, outer):
         info = ttk.Frame(outer)
         info.pack(fill="x", pady=(0, 2))
         ttk.Label(info, textvariable=self.status_var).pack(side="left")
@@ -910,7 +1015,7 @@ class PersonalGameAIApp:
 
         preview_frame = ttk.LabelFrame(
             outer,
-            text="Live game capture — drag a rectangle here after pressing Select Template"
+            text="Live game capture — drag here after Select Template"
         )
         preview_frame.pack(fill="both", expand=True)
 
@@ -3001,6 +3106,8 @@ class PersonalGameAIApp:
             if self.capture.last_error:
                 self.status_var.set(f"Capture error: {self.capture.last_error}")
 
+            self._check_game_covered()
+
             if frame is not None:
                 self.latest_raw_frame = frame
                 if self._capture_is_live():
@@ -3011,6 +3118,30 @@ class PersonalGameAIApp:
         self._poll_effect_watch()
         self._poll_agent_run()
         self.root.after(33, self._poll_preview)
+
+    def _check_game_covered(self):
+        """Warn once when this window starts or stops hiding the captured game."""
+        now = time.monotonic()
+        if now - self._last_cover_check < COVER_CHECK_SECONDS:
+            return
+        self._last_cover_check = now
+        try:
+            own = win32gui.GetWindowRect(int(self.root.wm_frame(), 16))
+            game = client_region(self.capture.hwnd)
+        except Exception:
+            return
+        share = overlap_fraction(own, game)
+        covered = share >= COVER_WARN_FRACTION
+        if covered == self._game_covered:
+            return
+        self._game_covered = covered
+        if covered:
+            self.log(
+                f"Warning: this window covers {share:.0%} of the game. Capture reads the "
+                "screen, so vision sees this window too. Move it beside the game."
+            )
+        else:
+            self.log("This window no longer covers the game.")
 
     def _draw_preview(self, frame):
         source_h, source_w = frame.shape[:2]
