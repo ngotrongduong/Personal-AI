@@ -191,7 +191,27 @@ class MeterDemoApp:
         )
 
 
+def prepare_windows() -> None:
+    """Windows-only setup before the first window exists. Best effort.
+
+    - DPI awareness: draw in physical pixels so the client ROI holds at any
+      display scaling. Otherwise Windows bitmap-scales the window (e.g. 1.5x
+      at 150%) and the captured bar no longer sits at METER_ROI.
+    - No IME: an input method (e.g. a Vietnamese or CJK IME) would take the
+      H/D/digit keys into its composition window, which Tk never receives.
+    """
+
+    try:
+        import ctypes
+
+        ctypes.windll.shcore.SetProcessDpiAwareness(1)
+        ctypes.windll.imm32.ImmDisableIME(0)
+    except (AttributeError, ImportError, OSError):
+        pass
+
+
 def main() -> None:
+    prepare_windows()
     print("Personal Game AI meter demo")
     print(f"window title: {WINDOW_TITLE}")
     print(f"client ROI: {list(METER_ROI)}")
