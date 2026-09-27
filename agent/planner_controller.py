@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 import threading
 import time
 
@@ -189,6 +189,7 @@ class PlannerController:
         notes: NoteBook | None = None,
         allow_notes: bool = False,
         on_note: NoteCallback | None = None,
+        meters: Mapping[str, float] | None = None,
     ) -> bool:
         """Start a configured planner scheduler, replacing any prior scheduler.
 
@@ -231,6 +232,7 @@ class PlannerController:
             proposals=sink,
             notes=_ReadOnlyNotes(notes) if notes is not None else None,
             note_sink=note_sink,
+            meters=meters,
         )
         scheduler_options: dict[str, object] = {
             "interval_seconds": config.interval_seconds,

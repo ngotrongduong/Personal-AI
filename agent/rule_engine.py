@@ -7,6 +7,7 @@ from typing import TypeAlias
 
 from .game_state import BBox, GameState
 from .meter_conditions import (
+    METER_SOURCE,
     MeterCondition,
     accepted_meter_value,
     condition_matches_value,
@@ -191,6 +192,10 @@ class RuleEngine:
     ) -> ActionIntent | None:
         observation = state.get(rule.detector_name)
         if observation is None or not observation.visible:
+            return None
+        if observation.source == METER_SOURCE:
+            # v1.1 meter invariant: a meter reading is a value, not a detector
+            # hit, so a visibility rule never fires on it or aims at its ROI.
             return None
         if observation.confidence < rule.min_confidence:
             return None

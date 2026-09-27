@@ -6,6 +6,7 @@ from collections.abc import Iterable
 from vision.resource_bar import ResourceBarMeasurement
 
 from .game_state import GameState, Observation
+from .meter_conditions import METER_SOURCE
 
 
 def apply_resource_measurements(
@@ -32,7 +33,7 @@ def apply_resource_measurements(
             bbox=measurement.bbox,
             value=measurement.fraction if measurement.valid else None,
             observed_at=stamp,
-            source="vision:resource_bar",
+            source=METER_SOURCE,
         )
         observations.append(observation)
 

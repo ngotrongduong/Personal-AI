@@ -19,6 +19,7 @@ import time
 from typing import ClassVar, TypeAlias
 
 from .game_state import GameState
+from .meter_conditions import METER_SOURCE
 from .rule_engine import ActionIntent
 
 
@@ -339,6 +340,9 @@ def _click_intent(
         return SkillIntentResult(skill.name, None, f"detector {skill.detector!r} not observed")
     if not observation.visible:
         return SkillIntentResult(skill.name, None, f"detector {skill.detector!r} not visible")
+    if observation.source == METER_SOURCE:
+        # v1.1 meter invariant: a meter's ROI is never a click target.
+        return SkillIntentResult(skill.name, None, f"{skill.detector!r} is a meter, not a detector")
     if observation.confidence < skill.min_confidence:
         return SkillIntentResult(
             skill.name,
