@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: `feature/v1.1-meters` (Issue #92). v1.1 sub-tasks branch from it and PR back into it; the release PR from `feature/v1.1-meters` to `main` must land as a merge commit.
+- Active integration branch: none right now. The last one, `feature/v1.1-meters` (Issue #92), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,10 +94,10 @@ feature/<milestone>
 
 ## Current priority
 
-v1.1 "Meters" (Issue #92) is the active milestone on `feature/v1.1-meters`.
-It wires the existing resource-bar measurement into profiles, GameState, rules,
-expectations, stop conditions and the planner prompt. Meters are observation-only
-and fail closed on invalid/stale/low-confidence readings.
+v1.1 "Meters" (Issue #92) is released on `main`. It wires the existing
+resource-bar measurement into profiles, GameState, rules, expectations, stop
+conditions and the planner prompt. Meters are observation-only and fail closed
+on invalid/stale/low-confidence readings.
 
 v1.0 "Personal Game Agent" (Issue #82) is released on `main`. It closes the
 loop vision → state → plan → action → observation:
@@ -108,7 +108,7 @@ loop vision → state → plan → action → observation:
 - a user guide.
 
 Earlier steps: v0.6 profiles + skills, v0.7 a planner that picks skills, v0.8
-session memory (all released). No milestone after v1.0 is planned yet; see
+session memory (all released). No milestone after v1.1 is planned yet; see
 `docs/ROADMAP.md` for candidates. Scope a new milestone in `docs/PLAN.md`
 before implementing anything.
 

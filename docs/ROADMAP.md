@@ -115,17 +115,21 @@
 - Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`: all 9
   acceptance criteria passed.
 
-## Active — v1.1 Meters (Issue #92)
-
-- Wire the existing HSV/ROI resource-bar measurement into game profiles as
-  named meters such as HP, mana, stamina or progress.
-- Expose normalized meter values through GameState and the planner prompt.
-- Add fail-closed meter conditions for expectations, stop conditions and rules:
-  `below`, `above`, `rises`, `falls`.
-- Meter rules may only choose declared skills and remain behind the existing
+### Stage 10 — Meters (v1.1, Issue #92)
+- The existing HSV/ROI resource-bar measurement is wired into game profiles as
+  named meters (HP, mana, stamina, progress) and measured every vision tick.
+- Normalized meter values reach GameState, the status line and the planner
+  prompt.
+- Fail-closed meter conditions (`below`, `above`, `rises`, `falls`) work in
+  expectations, `planner.stop_when` and meter rules.
+- Meter rules only choose declared skills and stay behind the existing
   SkillExecutor / ActionDispatcher / InputController gates.
-- Add calibration/test tooling plus a harmless Windows meter demo.
-- OCR-based numeric meters are explicitly out of scope for v1.1.
+- Calibration tooling (`scripts/meters.py suggest|test`) and a harmless
+  Windows demo (`scripts/meter_demo.py`).
+- Live-smoke-tested on Windows with `scripts/meter_demo.py` and Ollama
+  `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed.
+
+No milestone after v1.1 is planned yet.
 
 ## Later
 

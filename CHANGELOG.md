@@ -2,6 +2,56 @@
 
 All notable project changes are tracked here.
 
+## v1.1.0 — Meters
+
+v1.1 lets a profile declare color-coded bars (HP, mana, stamina, progress) as
+**meters**. The app measures them every vision tick, and the planner, skill
+effects, run goals and rules can use them as numbers — without any new input
+path.
+
+- **Profile `meters` block** (`agent/profile.py`, `MeterDefinition`): name,
+  client-frame `roi`, one or more OpenCV `hsv_ranges`, `direction`,
+  `min_slice_coverage`, `max_gap_slices`, `min_confidence`. Strict
+  validation, save/load round-trip, and detector and meter names share one
+  namespace (duplicates are rejected on load).
+- **Meter conditions** (`agent/meter_conditions.py`): `below` / `above` a
+  threshold, `rises` / `falls` by a delta. They fail closed: a missing,
+  invalid, stale or low-confidence reading satisfies nothing.
+  - Skill `expect` accepts a meter condition. `rises` / `falls` compare with
+    the fresh reading taken when the step finished.
+  - `planner.stop_when` accepts a meter threshold; only a fresh valid reading
+    ends a run with `goal reached`.
+- **Meter rules** (`agent/rule_engine.py`, `MeterRule`): a threshold or
+  change rule that can only start its declared, enabled skill, with a
+  cooldown and a freshness limit. Change rules compare consecutive accepted
+  fresh samples. The planner can enable/disable them like other rules.
+- **Live wiring** (`agent/meter_live.py`, `main.py`): meters are measured on
+  every vision tick with the same timestamp as the detectors. A clipped ROI
+  or a measurement error gives an invalid reading (`hp=?`), and transitions
+  between valid and invalid are logged. The status line shows
+  `hp=42%(0.97)`, the prompt shows `- hp: 42% (meter, confidence 0.97)` or
+  `- hp: unknown (meter)`, and preflight adds an advisory `Meters:` note.
+  A meter is never a target for a visibility rule or a click skill.
+- **Calibration tools** (`scripts/meters.py`, read-only): `suggest` proposes
+  an HSV range for a ROI on a saved snapshot; `test` measures every meter of
+  a profile on a snapshot.
+- **Smoke-test target** `scripts/meter_demo.py`: a harmless Tk window with
+  one green HP bar (keys H/D/R/0–4) and the matching example profile
+  `docs/examples/meter_demo_profile.json`. The demo is DPI aware and turns
+  its own IME off, so the ROI holds at any display scaling and a Vietnamese
+  or CJK input method cannot swallow its keys.
+- `docs/USER_GUIDE.md`: a "Meters" section — snapshot, `suggest`, declare,
+  `test`, then use meters in `expect`, `stop_when` and rules (auto-potion
+  example).
+- **Meter invariant:** meters only read; conditions fail closed; the profile,
+  never the model, defines meters, thresholds and rule targets; the meter
+  modules never import the input path (checked by a test).
+- Note: an empty bar is a valid 0% reading. A wrong color over a bar
+  therefore reads 0%, not unknown — calibrate with `scripts/meters.py test`.
+- Live-smoke-tested on Windows with `scripts/meter_demo.py` and Ollama
+  `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed (see
+  `docs/PLAN.md` "Smoke test results").
+
 ## v1.0.0 — Personal Game Agent
 
 v1.0 closes the loop vision → state → plan → action → observation. The

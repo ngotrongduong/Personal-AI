@@ -1,9 +1,27 @@
-# Personal Game AI v1.0.0
+# Personal Game AI v1.1.0
 
-Current release: **v1.0 — Personal Game Agent**. New here? Start with
+Current release: **v1.1 — Meters**. New here? Start with
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), which goes from install to a first
 supervised agent run on Notepad. See `CHANGELOG.md` for the full history and
 `docs/ARCHITECTURE.md` for the runtime design.
+
+## v1.1 at a glance
+
+- **The agent reads bars as numbers.** A profile can declare `meters` — a
+  color-coded HP, mana, stamina or progress bar, given as a ROI plus an HSV
+  color range. The app measures them every vision tick; the status line shows
+  `hp=42%(0.97)` and the planner prompt shows `- hp: 42% (meter, …)`.
+- **Meter conditions** — `below` / `above` a threshold, `rises` / `falls` by a
+  delta — work in a skill's `expect`, in `planner.stop_when` and in **meter
+  rules** such as "hp below 30% → `drink_potion`, cooldown 5 s".
+- **Fail closed:** a reading that is missing, invalid (`hp=?`), stale or
+  below its confidence satisfies nothing — no rule fires, no effect is
+  confirmed, no goal is met.
+- **Nothing new can press keys.** A meter rule can only start a skill that the
+  profile already declares and you enabled, through the same executor,
+  dispatcher, input switch and F8 as before. The model never defines meters.
+- Calibrate with `scripts/meters.py suggest` / `test` on a saved snapshot, and
+  try it safely on the `scripts/meter_demo.py` window (see the user guide).
 
 ## v1.0 at a glance
 
@@ -256,6 +274,5 @@ or protected-process evasion.
 
 ## Next milestone
 
-See `docs/ROADMAP.md`. v1.0 (Personal Game Agent) is released. Later work
-(multiple templates, OCR, HP-bar analysis, imitation-learning experiments)
-is listed there.
+See `docs/ROADMAP.md`. v1.1 (Meters) is released. Later work (multiple
+templates, OCR, imitation-learning experiments) is listed there.
