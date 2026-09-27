@@ -130,7 +130,8 @@ RECORDING_CLOSE_WAIT_SECONDS = 3.0
 
 PROFILE_NONE_TEXT = "Profile: none loaded. Key skills stay blocked until a profile is loaded."
 SKILLS_NONE_TEXT = "Skills: none. Load a profile to list its skills."
-SKILLS_PER_ROW = 2
+# One per row: the v1.1.1 left column is too narrow for a second column of skills.
+SKILLS_PER_ROW = 1
 SKILL_NO_RESULT_TEXT = "—"
 
 

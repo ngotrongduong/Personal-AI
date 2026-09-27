@@ -2,6 +2,13 @@
 
 All notable project changes are tracked here.
 
+## Unreleased
+
+- **All skills visible again** (`main.py`, `SKILLS_PER_ROW`): the skills
+  panel laid out two skills per row, and since the v1.1.1 layout the second
+  column fell outside the narrower left panel, so every second skill was
+  hidden. Skills are now listed one per row.
+
 ## v1.1.1 — High-DPI window fix
 
 Found while testing on a real game (Pixel Dungeon ML in Google Play Games)
