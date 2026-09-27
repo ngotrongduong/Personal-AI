@@ -55,7 +55,9 @@ Start the app with `.\run.bat`.
    window you pick, so keep your other windows out of the way.
 2. **Pick the window.** In **Game window**, choose `Untitled - Notepad`
    (press **Refresh** if it is missing), then press **Start Capture**. The
-   preview shows Notepad.
+   preview shows Notepad. Capture reads that area of the screen, so keep
+   this app window **beside** the game, not on top of it; the log warns if
+   it covers the game.
 3. **Load the example profile.** In **Profile**, choose `example` and press
    **Load Profile**. Input control must be off to load a profile. The
    example has two skills, `type_x` and `hold_space`. It also sets the Goal
