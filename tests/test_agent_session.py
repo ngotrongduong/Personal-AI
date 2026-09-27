@@ -92,6 +92,20 @@ class PreflightTests(unittest.TestCase):
         notes = [check.line() for check in report.checks if not check.ok]
         self.assertTrue(all(line.startswith("[NOTE]") for line in notes))
 
+    def test_meters_check_is_advisory_and_only_shown_with_meters(self) -> None:
+        self.assertNotIn("Meters", [check.name for check in run_preflight(_facts()).checks])
+
+        known = run_preflight(_facts(meters="hp 42%"))
+        meters = [check for check in known.checks if check.name == "Meters"][0]
+        self.assertEqual(meters.line(), "[OK] Meters: hp 42%")
+        self.assertEqual(known.summary(), "Ready")
+
+        unknown = run_preflight(_facts(meters="hp unknown", meters_all_known=False))
+        meters = [check for check in unknown.checks if check.name == "Meters"][0]
+        self.assertEqual(meters.line(), "[NOTE] Meters: hp unknown")
+        self.assertTrue(unknown.ready)
+        self.assertEqual(unknown.summary(), "Ready (check: Meters)")
+
 
 class RunBudgetTests(unittest.TestCase):
     def test_remaining_and_expiry(self) -> None:

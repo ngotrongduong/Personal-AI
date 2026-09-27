@@ -72,6 +72,9 @@ class PreflightFacts:
     enabled_skills: tuple[str, ...]
     input_enabled: bool
     goal: str
+    # v1.1: "hp 42%, mp unknown" for the profile's meters; "" when it has none.
+    meters: str = ""
+    meters_all_known: bool = True
 
 
 @dataclass(frozen=True, slots=True)
@@ -166,6 +169,17 @@ def run_preflight(facts: PreflightFacts) -> PreflightReport:
             facts.goal.strip() if facts.goal.strip() else "no goal set; the planner guesses",
         ),
     ]
+    if facts.meters:
+        # Advisory only: an unknown meter never blocks a start; it just
+        # satisfies no condition until it reads again.
+        checks.append(
+            PreflightCheck(
+                "Meters",
+                facts.meters_all_known,
+                False,
+                facts.meters,
+            )
+        )
     return PreflightReport(tuple(checks))
 
 

@@ -29,12 +29,23 @@ Merged with green Windows CI:
   exact floating-point delta boundaries and resetting a change-rule baseline
   across disable/re-enable.
 
+- PR #98: Save/Save As preserves a loaded profile's meter definitions.
+- Task 5 — PR #99: read-only `scripts/meters.py suggest|test`, USER_GUIDE
+  calibration docs and examples.
+- Task 6 harness — PR #100: `scripts/meter_demo.py` plus the meter-only demo
+  profile.
+
 Current work:
-- PR #98 merged: Save/Save As now preserves a loaded profile's meter definitions,
-  with a UI regression test.
-- Task 5 merged via PR #99 with green Windows CI: read-only `scripts/meters.py suggest|test`, USER_GUIDE calibration docs and examples.
-- `codex/v1.1-meter-demo` prepares the harmless Task 6 smoke target, matching meter-only profile and synthetic geometry/profile tests. The live Windows run remains Claude's lane.
-- Task 4 live `main.py` measurement/prompt/preflight wiring remains the machine-access lane. It must capture a fresh accepted meter baseline at skill completion for `expect.rises/falls`.
+- Task 4 live wiring on `claude/v1.1-live-wiring` (Claude, with the pure
+  `agent/meter_live.py` helpers and the prompt meter line written by Codex via
+  the Codex plugin). Every vision tick measures the profile's meters with the
+  detectors' timestamp. A clipped ROI or a measurement error makes that meter
+  invalid. The status line shows `hp=42%(0.97)` / `hp=?`, the prompt shows
+  `- hp: 42% (meter, …)`, and preflight has an advisory `Meters` note. A
+  `rises`/`falls` expect takes its baseline from a fresh accepted reading at
+  step end.
+- Next: Task 6 live Windows smoke test on `scripts/meter_demo.py` (Claude),
+  then Task R.
 
 Do not duplicate Tasks 1–3 or Task 5 without checking the active branches/PRs.
 

@@ -38,6 +38,11 @@ class WindowCapture:
         except Exception:
             pass
 
+    @property
+    def running(self) -> bool:
+        """True while the grab thread is alive (it ends when the window is gone)."""
+        return self._thread is not None and self._thread.is_alive()
+
     def latest_frame(self) -> Optional[np.ndarray]:
         with self._lock:
             return None if self._latest is None else self._latest.copy()

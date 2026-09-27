@@ -18,6 +18,9 @@ from .game_state import GameState, Observation
 MeterOperator: TypeAlias = Literal["below", "above", "rises", "falls"]
 METER_OPERATORS: tuple[MeterOperator, ...] = ("below", "above", "rises", "falls")
 DEFAULT_METER_MIN_CONFIDENCE = 0.8
+# GameState source of a meter reading (agent.resource_state_bridge). A reading
+# with this source is a value, never a detector hit or a click target.
+METER_SOURCE = "vision:resource_bar"
 
 
 class MeterConditionError(ValueError):

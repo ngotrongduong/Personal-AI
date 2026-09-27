@@ -21,6 +21,7 @@ import win32gui
 from agent.action_dispatcher import ActionDispatcher
 from agent.agent_session import (
     DEFAULT_MAX_RUN_MINUTES,
+    GOAL_FRESH_SECONDS,
     AgentRun,
     PreflightFacts,
     PreflightReport,
@@ -39,6 +40,8 @@ from agent.autopilot import (
 from agent.game_state import GameState
 from agent.llm_planner import MAX_GOAL_LENGTH, SkillBookCatalog
 from agent.memory_store import check_slug, new_session_path, notes_path
+from agent.meter_conditions import accepted_meter_value
+from agent.meter_live import measure_meters, meter_validity_changes, meters_status_parts, meters_summary
 from agent.notes import (
     MAX_LLM_NOTES,
     MAX_NOTES,
@@ -65,9 +68,16 @@ from agent.profile import (
     read_templates,
     save_profile,
 )
+from agent.resource_state_bridge import apply_resource_measurements
 from agent.rule_engine import SKILL_RULE_ACTION, ActionIntent, RuleEngine, VisibilityRule
 from agent.session_log import SessionLogWriter
-from agent.skill_effects import EFFECT_NOT_SEEN, EFFECT_PENDING, EffectWatch, Expectation
+from agent.skill_effects import (
+    EFFECT_NOT_SEEN,
+    EFFECT_PENDING,
+    EffectWatch,
+    ExpectationLike,
+    MeterExpectation,
+)
 from agent.skill_executor import SkillExecutor
 from agent.skills import ClickSkill, HoldSkill, PressSkill, Skill, SkillBook, SkillPermissions
 from agent.step_history import Decision, StepHistory, StepRecord
@@ -329,6 +339,9 @@ class PersonalGameAIApp:
         self.registry = DetectorRegistry()
         self.game_state = GameState()
         self._registry_visibility: dict[str, bool] = {}
+        # v1.1 profile meters: last validity per meter, errors already logged.
+        self._meter_validity: dict[str, bool] = {}
+        self._meter_errors: set[str] = set()
         self.rule_engine = RuleEngine()
         # v0.6 profiles. Profiles are read and written only on the Tk thread;
         # the dispatcher reads the loaded profile's permissions on every key
@@ -1310,6 +1323,8 @@ class PersonalGameAIApp:
         self.registry.clear()
         self._detector_templates.clear()
         self._registry_visibility.clear()
+        self._meter_validity.clear()
+        self._meter_errors.clear()
         self.game_state.clear()
         self.detectors_var.set("Detectors: none registered")
         self.log("All named detectors cleared.")
@@ -1318,6 +1333,11 @@ class PersonalGameAIApp:
         name = self.rule_name_var.get().strip()
         detector_name = self.rule_detector_var.get().strip()
         try:
+            if detector_name in self._meter_names():
+                # v1.1: a meter's ROI is never a click target.
+                raise ValueError(
+                    f"'{detector_name}' is a profile meter; a click rule needs a detector."
+                )
             min_confidence = float(self.rule_min_confidence_var.get())
             rule = VisibilityRule(
                 name=name,
@@ -1413,6 +1433,8 @@ class PersonalGameAIApp:
         self.registry = registry
         self._detector_templates = kept
         self._registry_visibility.clear()
+        self._meter_validity.clear()
+        self._meter_errors.clear()
         self.game_state.clear()
         self.rule_engine = rule_engine
         self.skill_book = skill_book
@@ -1427,9 +1449,10 @@ class PersonalGameAIApp:
         self.memory_llm_notes_var.set(profile.planner.llm_notes)
         self._switch_notebook(slug)
 
-        if profile.detectors:
+        if profile.detectors or profile.meters:
             self.detectors_var.set(
-                f"Detectors: {len(profile.detectors)} registered from profile."
+                f"Detectors: {len(profile.detectors)} registered from profile, "
+                f"{len(profile.meters)} meters."
             )
             self.vision_enabled_var.set(True)
         else:
@@ -1438,7 +1461,8 @@ class PersonalGameAIApp:
         enabled = sum(skill_book.is_enabled(name) for name in skill_book.names)
         self.profile_status_var.set(
             f"Profile: {profile.name} (profiles/{folder_name}) · "
-            f"{len(profile.detectors)} detectors · {len(skill_book.names)} skills "
+            f"{len(profile.detectors)} detectors · {len(profile.meters)} meters · "
+            f"{len(skill_book.names)} skills "
             f"({enabled} enabled in file) · {len(rule_engine.rules)} rules"
         )
         self.log(
@@ -1705,6 +1729,8 @@ class PersonalGameAIApp:
                 notes=self.notebook,
                 allow_notes=allow_notes,
                 on_note=lambda result: self._queue_planner_note(generation, result),
+                # Meter thresholds for the prompt, read once on the Tk thread.
+                meters={meter.name: meter.min_confidence for meter in self._profile_meters()},
             )
             self.agent_run = run
         except ValueError as exc:
@@ -1909,6 +1935,18 @@ class PersonalGameAIApp:
     ) -> PreflightFacts:
         book = self.skill_book
         enabled = tuple(name for name in book.names if book.is_enabled(name)) if book else ()
+        meters = self.profile.meters if self.profile is not None else ()
+        now = time.monotonic()
+        meters_known = all(
+            accepted_meter_value(
+                self.game_state.get(meter.name),
+                min_confidence=meter.min_confidence,
+                now=now,
+                max_age_seconds=GOAL_FRESH_SECONDS,
+            )
+            is not None
+            for meter in meters
+        )
         return PreflightFacts(
             profile_name=self.profile.name if self.profile is not None else None,
             capture_running=self.capture is not None,
@@ -1920,6 +1958,10 @@ class PersonalGameAIApp:
             enabled_skills=enabled,
             input_enabled=self.input.enabled,
             goal=self.planner_goal_var.get(),
+            meters=meters_summary(
+                self.game_state, meters, now=now, max_age_seconds=GOAL_FRESH_SECONDS
+            ),
+            meters_all_known=meters_known,
         )
 
     def _show_preflight(self, report: PreflightReport):
@@ -2262,7 +2304,12 @@ class PersonalGameAIApp:
             except BaseException:
                 self._effect_pending.clear()
                 raise
-            self._effect_watch = EffectWatch(proposal.skill_name, expectation, record.finished_at)
+            self._effect_watch = EffectWatch(
+                proposal.skill_name,
+                expectation,
+                record.finished_at,
+                baseline_value=self._effect_baseline(expectation, record.finished_at),
+            )
             self._effect_record = record
             # The autopilot counts the step when its effect resolves.
             self.log(
@@ -2283,9 +2330,24 @@ class PersonalGameAIApp:
             self.log(f"Auto mode OFF: {auto_off}.")
             self._refresh_planner_panel()
 
-    def _step_expectation(self, skill_name: str) -> Expectation | None:
+    def _step_expectation(self, skill_name: str) -> ExpectationLike | None:
         profile = self.profile
         return profile.expectations.get(skill_name) if profile is not None else None
+
+    def _effect_baseline(self, expectation: ExpectationLike, finished_at: float) -> float | None:
+        """The accepted meter value at step end for a rises/falls expect (v1.1).
+
+        Only a fresh, valid reading counts. Otherwise None, and the change
+        expectation can then only end as not seen (fail closed).
+        """
+        if not isinstance(expectation, MeterExpectation) or not expectation.condition.is_change:
+            return None
+        return accepted_meter_value(
+            self.game_state.get(expectation.meter),
+            min_confidence=expectation.condition.min_confidence,
+            now=finished_at,
+            max_age_seconds=GOAL_FRESH_SECONDS,
+        )
 
     def _poll_effect_watch(self, now: float | None = None):
         """Tk loop: resolve the pending effect watch against the latest GameState."""
@@ -2753,7 +2815,12 @@ class PersonalGameAIApp:
         )
 
         detector_name = self.detector_name_var.get().strip()
-        if detector_name:
+        if detector_name and detector_name in self._meter_names():
+            # Detectors and meters share one GameState namespace (v1.1).
+            self.log(
+                f"Detector registration error: '{detector_name}' is a profile meter name."
+            )
+        elif detector_name:
             try:
                 self.registry.unregister(detector_name)
                 self._detector_templates.pop(detector_name, None)
@@ -2778,6 +2845,42 @@ class PersonalGameAIApp:
         y = (cy - self.preview_offset_y) / self.preview_scale
 
         return int(round(x)), int(round(y))
+
+    def _profile_meters(self):
+        return self.profile.meters if self.profile is not None else ()
+
+    def _meter_names(self) -> set[str]:
+        return {meter.name for meter in self._profile_meters()}
+
+    def _measure_meters(self, frame, meters, observed_at: float):
+        """Measure the profile's meters into GameState (v1.1, observation only).
+
+        A meter that cannot be read is written as invalid, so every condition
+        on it stays false. Nothing here can send input.
+        """
+        measurements, errors = measure_meters(frame, meters)
+        apply_resource_measurements(self.game_state, measurements, observed_at=observed_at)
+        for error in errors:
+            if error not in self._meter_errors:
+                self._meter_errors.add(error)
+                self.log(f"Meter error: {error}")
+        for name, valid in meter_validity_changes(self._meter_validity, measurements):
+            self._meter_validity[name] = valid
+            if valid:
+                self.log(f"Meter '{name}': reading.")
+            else:
+                self.log(f"Meter '{name}': no valid reading (conditions on it stay false).")
+
+    def _capture_is_live(self) -> bool:
+        """False while capture reports an error or its thread has ended.
+
+        The last frame is then frozen; stamping it as a new observation would
+        make old detector and meter readings look fresh, so vision skips the
+        tick and they go stale (fail closed).
+        """
+        if self.capture is None or getattr(self.capture, "last_error", None):
+            return False
+        return getattr(self.capture, "running", True) is not False
 
     def _run_vision_if_due(self, frame):
         if not self.vision_enabled_var.get():
@@ -2810,6 +2913,9 @@ class PersonalGameAIApp:
                 self.latest_match = None
                 self.vision_var.set(f"Vision error: {exc}")
 
+        # Detectors and meters of one tick share one timestamp.
+        observed_at = time.monotonic()
+        parts = []
         if self.registry.names:
             try:
                 detections = self.registry.detect_all(frame)
@@ -2817,9 +2923,8 @@ class PersonalGameAIApp:
                 self.detectors_var.set(f"Detectors error: {exc}")
                 return
 
-            apply_detections(self.game_state, detections.values())
+            apply_detections(self.game_state, detections.values(), observed_at=observed_at)
 
-            parts = []
             for name in sorted(detections):
                 detection = detections[name]
                 was_visible = self._registry_visibility.get(name)
@@ -2833,6 +2938,12 @@ class PersonalGameAIApp:
                 status = "FOUND" if detection.visible else "not found"
                 parts.append(f"{name}={status}({detection.confidence:.2f})")
 
+        meters = self._profile_meters()
+        if meters:
+            self._measure_meters(frame, meters, observed_at)
+            parts.extend(meters_status_parts(self.game_state, meters))
+
+        if parts:
             self.detectors_var.set("Detectors: " + "  |  ".join(parts))
 
         if self.rule_engine.rules:
@@ -2892,7 +3003,8 @@ class PersonalGameAIApp:
 
             if frame is not None:
                 self.latest_raw_frame = frame
-                self._run_vision_if_due(frame)
+                if self._capture_is_live():
+                    self._run_vision_if_due(frame)
                 self._draw_preview(frame)
 
         # After vision, so this frame's observations count.
