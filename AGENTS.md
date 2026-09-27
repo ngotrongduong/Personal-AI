@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: none right now. The last one, `feature/v1.1-meters` (Issue #92), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
+- Active integration branch: `feature/v1.2-tap-demos` (Issue #107). The last one, `feature/v1.1-meters` (Issue #92), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,6 +94,11 @@ feature/<milestone>
 
 ## Current priority
 
+v1.2 "Taps + demo labels" (Issue #107) is in progress on
+`feature/v1.2-tap-demos`. It adds a `tap` skill type (a fixed point from the
+profile), restores the cursor after clicks, and labels recorded demos with
+profile skills. See `docs/PLAN.md`.
+
 v1.1 "Meters" (Issue #92) is released on `main`. It wires the existing
 resource-bar measurement into profiles, GameState, rules, expectations, stop
 conditions and the planner prompt. Meters are observation-only and fail closed
@@ -108,9 +113,8 @@ loop vision → state → plan → action → observation:
 - a user guide.
 
 Earlier steps: v0.6 profiles + skills, v0.7 a planner that picks skills, v0.8
-session memory (all released). No milestone after v1.1 is planned yet; see
-`docs/ROADMAP.md` for candidates. Scope a new milestone in `docs/PLAN.md`
-before implementing anything.
+session memory (all released). `docs/ROADMAP.md` outlines v1.2 → v2.0.
+Scope each milestone in `docs/PLAN.md` before implementing anything.
 
 The invariants below stay in force for every later milestone.
 
@@ -181,3 +185,10 @@ Meter invariant (permanent from v1.1):
 - Meter observations use the existing GameState boundary. Invalid, stale or below-confidence measurements are false for every condition: no rule fires, no effect is confirmed and no goal is met.
 - Meter rules may only trigger an already-declared skill and still flow through SkillExecutor -> ActionDispatcher -> InputController; they never create keys, coordinates or hold durations.
 - Threshold/change conditions are bounded to normalized values in [0, 1] and must reference a declared meter.
+
+Tap invariant (permanent from v1.2):
+- A tap point comes only from the loaded profile (`at`, fractions of the client area). The LLM chooses a skill name only; it never supplies or changes a point.
+- A tap runs only while the captured window is the foreground window, only when every `requires` condition holds on a fresh observation (fail closed), and only at a point inside the live client area.
+- Taps use the same path and gates as every skill: SkillExecutor -> ActionDispatcher -> InputController, input on/F8, freshness, rate limit, cancel, disabled by default.
+- Restoring the cursor after a click is a cursor move only, never a button or key event.
+- Demo labeling only reads recordings and profiles; it never sends input or edits a profile, and nothing acts on labels.

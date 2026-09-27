@@ -1,232 +1,142 @@
-# v1.1 detailed plan — Meters
+# v1.2 detailed plan — Taps + demo labels
 
-**Status: released** as v1.1.0 — `feature/v1.1-meters` merged into `main`
-via PR #94 (merge commit), closing Issue #92.
+**Status: in progress** on `feature/v1.2-tap-demos` (Issue #107).
 
-v1.1 turns the existing v0.3 resource-bar primitive into a first-class profile
-observation. A game profile can declare meters such as HP, mana, stamina or
-progress. The app measures them every vision tick and exposes normalized values
-through `GameState`, the planner prompt, expectations, stop conditions and
-rules.
+v1.2 is the first step of the v1.2 → v2.0 track, which ends in an agent that
+learns from the user's own play (see `docs/ROADMAP.md`). Testing on a real
+game (Pixel Dungeon ML, 2026-09-28) showed two gaps:
 
-## Goal
+- most moves in a tile/touch game are taps on the map, which no skill type can
+  express. A click skill needs a detected template;
+- after a click skill, the cursor stays on the button. That changes how the
+  button looks, so its template match falls to 0 until the mouse moves.
 
-Make numeric/color bars usable by the agent without widening permissions.
+v1.2 adds a `tap` skill type and restores the cursor after every click. It also
+labels recorded demonstrations with the profile's skills, which gives the
+imitation work in v1.3 its data.
 
-Example outcome:
+## Design constraint (tap invariant, permanent from v1.2)
 
-```text
-hp: 42%
-mana: 78%
-```
-
-The planner may observe those values. The profile — never the model — defines
-what the meter means, where it is, which colors count, what thresholds matter
-and which skill a rule may trigger.
-
-## Design constraint
-
-### 1. Meters only read
-
-- Meter modules never import `skills`, `skill_executor`,
-  `action_dispatcher`, `core.input_controller` or `pydirectinput`.
-- Measurement only produces observations.
-- A meter condition cannot directly send input.
-
-### 2. Fail closed
-
-A meter condition is false unless the latest observation:
-
-- exists;
-- is valid/visible;
-- carries a numeric value in `[0.0, 1.0]`;
-- meets its configured confidence;
-- is fresh enough for that use.
-
-Invalid, stale or low-confidence data therefore:
-
-- fires no rule;
-- confirms no effect;
-- meets no stop condition.
-
-### 3. Profile is the authority
-
-The LLM never defines:
-
-- meter ROIs;
-- HSV ranges;
-- meter names;
-- thresholds;
-- rule targets.
-
-All of those come from the loaded profile and are validated before use.
-
-### 4. Shared namespace
-
-Meter names and detector names share one observation namespace. Duplicate names
-are rejected on profile load so `GameState["hp"]` can never ambiguously refer
-to both a detector and a meter.
-
-### 5. Conditions are bounded
-
-A meter condition references one declared meter and exactly one comparator:
-
-- `below`: current value < threshold;
-- `above`: current value > threshold;
-- `rises`: value increased by at least delta from a valid baseline;
-- `falls`: value decreased by at least delta from a valid baseline.
-
-Thresholds/deltas are normalized numbers in `[0, 1]`.
-
-For effects, the baseline is the fresh meter value at the end of the executed
-step and the comparison must resolve within the expectation window. For rules,
-change conditions compare consecutive accepted fresh samples. No stale sample
-may become a baseline.
-
-### 6. Existing input safety is unchanged
-
-A meter rule can only choose an already-declared enabled skill. Execution still
-goes through `SkillExecutor -> ActionDispatcher -> InputController`.
-F8/input-off/foreground/rate-limit/permission gates remain authoritative.
+1. **The profile is the only source of a tap point.** A tap skill carries a
+   fixed point, `at: [fx, fy]`, as fractions (0..1) of the captured window's
+   client area. The LLM still chooses only a skill *name*; it never supplies
+   or changes a point.
+2. **Tap is fail-closed:**
+   - it runs only while the captured window is the foreground window, like key
+     skills, because nothing on screen confirms what is under a fixed point;
+   - every `requires` condition must hold on a fresh observation at intent
+     build time, or no intent is built;
+   - the point must fall inside the live client area when dispatched.
+3. **Same gates as every skill.** A tap goes Skill → `SkillExecutor` →
+   `ActionDispatcher` → `InputController`:
+   - input on / F8;
+   - intent freshness;
+   - rate limit;
+   - cancel;
+   - disabled by default.
+4. **Cursor restore never adds input.** After a click, `InputController`
+   moves the cursor back to where it was. That is a cursor move only, with no
+   button or key event. If reading the position fails, nothing is restored.
+5. **Labeling only reads.** `label` reads a recording and a profile. It never
+   sends input, never edits the profile, and writes a file only when `--out`
+   is given, never overwriting unless `--overwrite` is given. Labels are data
+   for later milestones; nothing in v1.2 acts on them.
 
 ## Profile format
 
-Proposed `meters` block:
-
 ```json
-{
-  "meters": [
-    {
-      "name": "hp",
-      "roi": [20, 30, 220, 16],
-      "hsv_ranges": [
-        {"lower": [50, 180, 120], "upper": [80, 255, 255]}
-      ],
-      "direction": "left_to_right",
-      "min_slice_coverage": 0.5,
-      "max_gap_slices": 1,
-      "min_confidence": 0.8
-    }
-  ]
-}
+{"name": "step_right", "type": "tap", "at": [0.58, 0.47],
+ "requires": [{"detector": "btn_wait", "visible": true},
+              {"meter": "hp", "above": 0.3}],
+ "max_observation_age_seconds": 0.75,
+ "enabled": false,
+ "expect": {"detector": "btn_wait", "visible": true}}
 ```
 
-All coordinates are client-frame coordinates, matching the existing vision
-pipeline. `save_profile` must round-trip the block without inventing values.
-
-## Conditions
-
-Threshold form:
-
-```json
-{"meter": "hp", "below": 0.25, "min_confidence": 0.8}
-```
-
-Change form:
-
-```json
-{"meter": "hp", "rises": 0.20, "min_confidence": 0.8}
-```
-
-Exactly one of `below`, `above`, `rises`, `falls` is allowed.
-
-Meter forms are added to:
-
-- skill `expect`;
-- planner `stop_when`;
-- profile rules.
-
-Existing detector forms remain valid and unchanged.
+- `at`:
+  - exactly 2 finite numbers in `[0, 1]` (bools rejected);
+  - the dispatcher maps it to `left + min(int(fx * width), width - 1)`, and
+    the same for `y`.
+- `requires`:
+  - optional, at most 4 conditions;
+  - a condition is either a detector condition
+    `{"detector", "visible", "min_confidence"}` or a meter threshold
+    `{"meter", "below"|"above", "min_confidence"}`;
+  - `rises` / `falls` are rejected here, because nothing gives them a
+    baseline;
+  - names must be declared detectors / meters.
+- `max_observation_age_seconds`:
+  - how fresh each `requires` observation must be;
+  - default 0.75 s, the same as click skills.
+- Save/Load round-trips a tap skill unchanged.
 
 ## Components
 
-- `agent/profile.py`: parse/save `meters`, shared-name validation.
-- `agent/meter_conditions.py`: pure meter condition parsing/evaluation.
-- `agent/rule_engine.py`: `MeterRule` with cooldown/freshness/fail-closed behavior.
-- `main.py`: measure configured meters each vision tick, bridge to GameState,
-  show values, include them in planner state.
-- `agent/skill_effects.py` / `agent/agent_session.py`: meter condition forms.
-- `scripts/meters.py`: read-only `suggest` / `test` helpers.
-- `docs/USER_GUIDE.md`: profile meter setup and calibration.
-- `scripts/meter_demo.py`: harmless Windows smoke-test target.
+- `agent/skills.py`:
+  - `TapSkill`;
+  - `SkillBook.build_intent` for taps (checks `requires`, builds
+    `ActionIntent(action="tap", tap_point=(fx, fy))`).
+- `agent/skill_requirements.py`: pure, fail-closed `requires` parsing and
+  evaluation. It never imports the input path.
+- `agent/rule_engine.py`: `ActionIntent.tap_point`.
+- `agent/profile.py`: parse and save `tap` skills.
+- `agent/action_dispatcher.py`: a `tap` branch with the foreground gate,
+  client-area resolution and bounds check, rate limit, cancel and click.
+- `core/input_controller.py`: `click` restores the cursor.
+- `recording/labels.py` + `scripts/recordings.py label`:
+  - a mouse-button `down` inside a fresh visible detector bbox → that
+    detector's click skill;
+  - a click within `--radius` (default 0.03 of the client diagonal) of a tap
+    point → the nearest tap skill;
+  - a key `down` → the press or hold skill with that key (hold when it was
+    held at least half the hold time);
+  - anything else → `unlabeled` with its normalized point;
+  - the output is per-skill counts, plus an optional JSONL file.
+- `main.py`:
+  - `describe_skill` for taps (`tap (58%, 47%)`);
+  - Skills panel Run;
+  - planner prompt skill lines.
+- `docs/USER_GUIDE.md`: a "Tap skills" section and a "Label your demos"
+  section.
 
 ## Checklist
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | Done | ChatGPT (PR #93) | Issue #92, active integration branch, PLAN/invariant/HANDOFF/ROADMAP and draft release PR #94 are in place. |
-| 1 | Profile `meters` block | Done | ChatGPT (PR #95) | `MeterDefinition`, strict HSV/ROI/direction/confidence validation, save/load round-trip, detector/meter shared namespace rejection, dedicated tests; green Windows CI. |
-| 2 | Meter conditions | Done | ChatGPT (PR #96) | Pure fail-closed meter conditions; threshold/change operators; meter forms of `expect` and `stop_when`; effect/goal baselines; profile round-trip; observation-boundary tests; green Windows CI. |
-| 3 | `MeterRule` | Done | ChatGPT (PR #97) | Skill-only rule; cooldown/freshness; consecutive accepted-sample change logic; float-boundary fix; baseline reset across disable/re-enable; green Windows CI. |
-| 4 | Live wiring | Done (PR #102) | Claude + Codex plugin | Every vision tick measures meters (same timestamp as detectors, clipped ROI/error → invalid, per-meter isolation, logs on valid/invalid transitions). Status line `hp=42%(0.97)`/`hp=?`, prompt `- hp: 42% (meter, …)`/`unknown`, advisory preflight `Meters` note, fresh step-end baseline for `rises`/`falls` expects. Safety review fixes: a meter reading is never a visibility-rule/click-skill target and its name is refused for UI click rules/detectors; the prompt and status show only confident fresh readings; vision skips frozen frames after a capture error. |
-| 5 | Meter tools/docs | Done | ChatGPT (PR #99) | Read-only `suggest`/`test`, USER_GUIDE and example; strict generated-option validation; clipped-ROI rejection; synthetic tests; green Windows CI. |
-| 6 | Windows smoke test | Done (PR #103) | ChatGPT helper (PR #100) + Claude | Live run on Windows 11 with `scripts/meter_demo.py` and Ollama `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed (see "Smoke test results"). The demo is now DPI aware and turns its own IME off. |
-| R | Release v1.1.0 | Done (this PR + PR #94) | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/version, green CI, release PR merge commit. |
+| 0 | Kickoff | In progress | Claude | Issue #107, `feature/v1.2-tap-demos`, this plan, tap invariant, HANDOFF/ROADMAP, draft release PR. |
+| 1 | `tap` skill: skills/profile/intent/dispatcher + `requires` | To do | Codex (else Claude) | Tests for parsing, round-trip, fail-closed `requires`, foreground and bounds gates. |
+| 2 | Cursor restore in `InputController.click` | To do | Codex (else Claude) | Injected get/set cursor for tests; restore even when the click raises. |
+| 3 | Demo labeling (`recording/labels.py`, `recordings.py label`) | To do | Codex (else Claude) | Synthetic sessions in tests. |
+| 4 | `main.py` wiring + safety review | To do | Claude | describe_skill, Skills panel, prompt. |
+| 5 | Docs + example | To do | Codex (else Claude) | USER_GUIDE, example profile tap skill (no templates committed). |
+| 6 | Windows smoke test | To do | Claude | Pixel Dungeon ML: harmless taps only (no fights, permadeath); cursor restore fixes the LOST button. |
+| R | Release v1.2.0 | To do | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS/version, merge commit. |
 
 ## Acceptance criteria
 
-1. A valid profile meter round-trips through load/save without changing its
-   meaning; malformed meters and detector/meter name collisions are rejected.
-2. Live capture updates meter observations in `GameState` with normalized
-   values and confidence.
-3. Invalid, stale or below-confidence measurements satisfy no meter condition.
-4. The planner prompt can show a meter as a percentage but cannot alter its
-   definition.
-5. `expect` supports meter threshold/change conditions and only observations
-   made after a completed step can confirm the effect.
-6. `stop_when` supports meter conditions and only a fresh valid reading can
-   end a run.
-7. A meter rule can trigger only its declared skill, respects cooldown/freshness,
-   and all existing dispatcher/input/F8 gates remain unchanged.
-8. Consecutive-sample `rises` / `falls` logic never uses an invalid or stale
-   sample as its baseline.
-9. The Windows smoke test on `scripts/meter_demo.py` demonstrates live
-   measurement, a threshold condition, a change condition, planner visibility
-   and F8 behavior without introducing a new input path.
-
-## Smoke test results
-
-Run on 2026-09-28, Windows 11 at 150% display scaling, RTX 4070 Ti, Ollama
-`qwen3.5:9b`, against the `scripts/meter_demo.py` window only (no game, no
-user app received input). An in-process script drove the real app (capture,
-vision tick, rule engine, planner, executor, dispatcher, F8 hook) and
-approved each planner proposal. Result: **46/46 checks passed**.
-
-| # | Criterion | Result |
-|---|-----------|--------|
-| 1 | Round-trip and rejection | PASS — meters, meter rules, `expect` and `stop_when` round-trip unchanged; a bad HSV range, a rule or `expect` naming an unknown meter, and a detector/meter name collision are each rejected with one clear load error (the only 4 dialogs of the run). |
-| 2 | Live measurement | PASS — `hp` read 50% then followed the demo to 80% (confidence 1.00, source `vision:resource_bar`); status line `hp=80%(1.00)`. |
-| 3 | Fail closed | PASS — a ROI outside the frame reads `hp=?`; neither an invalid nor a stale reading fired the rule with input on; an invalid reading with the bar at 100% did not end a run with goal `hp above 95%`. |
-| 4 | Planner visibility | PASS — the prompt showed `- hp: 50% (meter, confidence 1.000)`, then the new level after each step, and `- hp: unknown (meter)` for the invalid meter; preflight showed `Meters: hp 50%`. |
-| 5 | `expect` | PASS — `heal` with `rises 0.1` was confirmed twice (50→70→90%); `damage` with `falls 0.1` at 0% was recorded `not seen`. |
-| 6 | `stop_when` | PASS — the third heal reached 100% and the run ended with `goal reached`. |
-| 7 | Meter rule | PASS — `hp below 30%` was BLOCKED with input off; with input on it started `heal` through the executor, 0→20→40%, the second firing 1.1 s later (cooldown 1 s), then stopped above the threshold. |
-| 8 | Baseline | PASS — a 2 s-old reading gave no baseline; a fresh one did. |
-| 9 | F8 | PASS — F8 turned input off, stopped the planner (`session_end` `emergency stop`); afterwards the meter rule fired nothing at 0% and no Ollama request was sent. |
-
-Findings fixed or recorded during the smoke test:
-
-- **An empty or wrong-color bar is a valid 0% reading**, not unknown. Only a
-  ROI clipped by the frame (or a measurement error) gives `hp=?`. The user
-  guide already tells users to check `scripts/meters.py test`.
-- **`scripts/meter_demo.py` was DPI unaware** — at 150% scaling Windows
-  bitmap-scaled the bar, so the example ROI missed it. The demo now calls
-  `SetProcessDpiAwareness(1)`.
-- **A Vietnamese IME swallowed the demo's keys** (H/D/digits sent to the Tk
-  window). The demo now disables its own IME with `ImmDisableIME(0)`.
-- **Windows' foreground lock** can refuse `SetForegroundWindow` for the smoke
-  script; the harness retries after a zero-distance mouse move (no key sent).
-  The app itself is unaffected: a user clicks the game window.
-- **Ollama:** the first load of `qwen3.5:9b` with little free RAM took over
-  4 minutes (longer than the planner timeout), and once the server stopped
-  answering after a cancelled request until restarted. Prewarm the model
-  (the preflight `Ollama` check only lists models) before a supervised run.
+1. A tap skill round-trips through Save/Load. A malformed `at` or `requires`
+   (out of range, a bool, the wrong length, an unknown name, `rises`) is
+   rejected with one clear error.
+2. A tap intent is built only when every `requires` condition holds on a
+   fresh observation. A missing, stale, low-confidence or invalid
+   observation builds no intent.
+3. The dispatcher sends a tap only with input on and the captured window in
+   the foreground, at the profile's point inside the live client area, under
+   the rate limit. F8 or cancel blocks it.
+4. The LLM can run a tap skill only by name. The prompt shows the skill, and
+   no directive carries coordinates.
+5. After any click (click skill, tap or UI rule), the cursor returns to its
+   previous position. On the real game, a clicked button is detected again
+   on the next vision tick without the user moving the mouse.
+6. `recordings.py label` maps a synthetic session's clicks and keys to the
+   right skills and counts unlabeled input. It writes nothing without
+   `--out`.
+7. Existing v1.1 profiles and all earlier invariants are unchanged.
+8. Tests and ruff are clean; CI is green.
 
 ## Out of scope
 
-- OCR-based numeric meters;
-- object detection;
-- model-generated meter definitions;
-- automatic profile editing by the LLM;
-- replay/imitation-learning changes;
-- anti-cheat, memory reading/injection or packet manipulation.
+- tap points chosen by the model, or relative to a detection (maybe later);
+- drags, right clicks, scrolls;
+- training any model on labels (v1.3);
+- acting on labels.

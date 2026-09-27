@@ -129,7 +129,35 @@
 - Live-smoke-tested on Windows with `scripts/meter_demo.py` and Ollama
   `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed.
 
-No milestone after v1.1 is planned yet.
+## Next: learning from the user's play (v1.2 → v2.0)
+
+The long-term goal is an agent that watches the user play a game for a while.
+Given full control, it then plays toward a goal the user sets: it reviews its
+own mistakes, writes down lessons and proposes improvements to its profile.
+Each step keeps every earlier invariant. The AI never grants itself keys,
+points or permissions; F8 always stops everything.
+
+- **v1.2 — Taps + demo labels (Issue #107, in progress).**
+  - A `tap` skill type: a fixed point from the profile, fail-closed
+    `requires`, foreground-gated.
+  - The cursor is restored after clicks.
+  - `scripts/recordings.py label` maps recorded input to profile skills.
+- **v1.3 — Imitation policy.**
+  - A small offline model trained on labeled demos. There are no downloads.
+  - It proposes skill *names* through the same planner gates, alongside or
+    instead of the LLM.
+- **v1.4 — Self-review.**
+  - After a run, it summarizes failures such as `not_seen` effects, blocked
+    steps and meter drops.
+  - It writes lessons, each with evidence, into session memory.
+- **v1.5 — Gated self-improvement.**
+  - It proposes profile patches, for example a threshold, a rule toggle or a
+    new tap point taken from unlabeled demo clicks.
+  - Each patch is scored before and after on recorded data.
+  - The user approves every patch.
+- **v2.0 — Autonomous play toward a user goal.**
+  - It works within a budget, stop conditions and death/failure detection.
+  - It runs only on a game or character the user marks as expendable.
 
 ## Later
 
