@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: none. v1.0 (`feature/v1.0-personal-agent`, Issue #82) merged into `main` as a merge commit at release. The next milestone gets a new `feature/<milestone>` branch.
+- Active integration branch: `feature/v1.1-meters` (Issue #92). v1.0 (`feature/v1.0-personal-agent`, Issue #82) merged into `main` as a merge commit at release.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -103,11 +103,31 @@ loop vision → state → plan → action → observation:
 - a user guide.
 
 Earlier steps: v0.6 profiles + skills, v0.7 a planner that picks skills, v0.8
-session memory (all released). No milestone after v1.0 is planned yet; see
-`docs/ROADMAP.md` for candidates. Scope a new milestone in `docs/PLAN.md`
-before implementing anything.
+session memory (all released).
+
+**Active milestone: v1.1 "Meters" (Issue #92, `feature/v1.1-meters`).** A
+profile declares meters (HP/resource bars measured by HSV color in a ROI).
+The planner sees them as percentages, and `expect`, `stop_when` and rules
+gain threshold (`below` / `above`) and change (`rises` / `falls`)
+conditions. See `docs/PLAN.md` for the spec, design constraint and
+acceptance criteria.
 
 The invariants below stay in force for every later milestone.
+
+Meter invariant (permanent, from v1.1):
+- Meters only read. Measuring a meter, writing it to `GameState` and checking
+  a meter condition never build an intent or call the skill book, the
+  executor or the dispatcher. The only way from a meter to input is a profile
+  rule or the planner naming a profile skill, through the usual gates.
+  `agent/meter_conditions.py` never imports the input path.
+- Fail closed. A missing, invalid, stale or low-confidence reading makes every
+  meter condition false: no rule fires, no effect is confirmed, no goal is
+  met.
+- Meters, thresholds and meter rules come only from the user's profile. The
+  model can never define or change them; it can only enable or disable rules
+  that already exist.
+- A change condition compares against a reading measured before the step, not
+  against anything the model says.
 
 Agent invariant (permanent, from v1.0):
 - Observation never adds input. Expectations, effect watches, preflight, the

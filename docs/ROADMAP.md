@@ -115,10 +115,19 @@
 - Live-smoke-tested on Windows with Notepad and Ollama `qwen3.5:9b`: all 9
   acceptance criteria passed.
 
-## Next (after v1.0)
+## In progress
 
-- Not planned yet. Candidates: multiple templates per detector, OCR,
-  color/HP-bar analysis and object detection.
+### Stage 10 — Meters (v1.1, Issue #92)
+- Profile `meters`: HP/resource bars measured by HSV color inside a ROI on
+  every vision tick (wiring in the v0.3 `vision/resource_bar.py`).
+- The planner sees `hp: 42%`; `expect`, `stop_when` and rules gain
+  `below` / `above` and `rises` / `falls` conditions that fail closed.
+- `scripts/meters.py` calibrates a meter from a snapshot.
+
+## Next (after v1.1)
+
+- Not planned yet. Candidates: OCR of numbers, multiple templates per
+  detector and object detection.
 - Imitation-learning experiments on recorded datasets remain a possible side
   track (offline training only; any replay goes through `ActionDispatcher`).
 

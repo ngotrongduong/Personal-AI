@@ -1,268 +1,338 @@
-# v1.0 detailed plan — Personal Game Agent
+# v1.1 detailed plan — Meters
 
-**Status: released as v1.0.0** (PR #84 into `main`, Issue #82 closed). This
-plan is kept for reference until the next milestone replaces it.
-
-Granular checklist for the current milestone (GitHub Issue #82), with
-status and owner, so progress can be checked without opening GitHub. This is
-the same checklist as Issue #82. **Keep them in sync:** when you tick
-something here, tick or comment it there too, in the same commit or timeframe
-as the work.
+This is the checklist for the current milestone (GitHub Issue #92), with
+each task's status and owner, so progress can be checked without opening
+GitHub. It is the same checklist as Issue #92. **Keep the two in sync:**
+when you tick something here, tick or comment it there too, in the same
+commit or timeframe as the work.
 
 For the current PR and branch situation, see `docs/HANDOFF.md` instead. That
 file changes faster than this one should.
 
-Earlier versions of this file are preserved in git history on `main`:
+Earlier versions of this file are kept in git history on `main`:
 - v0.4 Local AI Planner;
 - v0.5 Demonstration recording;
 - v0.6 Game Profiles + Skills;
 - v0.7 Closed-loop planner;
-- v0.8 Session memory.
+- v0.8 Session memory;
+- v1.0 Personal Game Agent.
 
 `docs/ROADMAP.md`'s Completed section summarizes them.
 
 ## Goal
 
-v1.0 closes the loop the roadmap has pointed at since v0.4:
-vision → state → plan → action → **observation**. The earlier steps were:
+Up to v1.0, the agent knows one thing about the screen: whether a template is
+visible. Many game decisions depend on a **number** instead:
+- drink a potion when HP is below 30%;
+- use a skill when mana is full;
+- after a potion, HP should go up.
 
-- v0.6 Profiles + Skills (released, Issue #50);
-- v0.7 closed-loop planner that picks skills (released, Issue #61);
-- v0.8 session memory (released, Issue #71);
-- **v1.0 one personal game agent (this milestone)**.
+The pieces already exist from v0.3, but nothing in the app uses them yet:
+- `vision/resource_bar.py` (`ResourceBarSpec`, `measure_resource_bars`)
+  measures how full a bar is, using HSV color ranges inside a ROI;
+- `agent/resource_state_bridge.py` (`apply_resource_measurements`) writes
+  the result into `GameState`: `value` is the fill fraction from 0 to 1, and
+  the source is `vision:resource_bar`.
 
-v1.0 delivers:
-- **Observed effects.** A skill may declare what it should change on screen
-  (`expect`: a detector that should become visible or disappear within a few
-  seconds). After the step, the app watches `GameState` and records the
-  effect as `confirmed` or `not_seen`. The planner sees the effect in its
-  recent steps, the session log records it, and auto mode counts `not_seen`
-  as a failed step.
-- **Agent runs.** One **Agent** panel with Preflight, Start Agent and Stop
-  Agent:
-  - *Preflight* checks everything a run needs (profile, capture, planner
-    settings, Ollama and the model, enabled skills, input control) and shows
-    each check with a clear reason.
-  - *Start Agent* runs the preflight and starts the planner only when every
-    required check passes.
-  - A **run budget** (`planner.max_run_minutes`) and an optional **goal
-    condition** (`planner.stop_when`: a detector seen on screen) end the run
-    by themselves.
-- **A user guide** (`docs/USER_GUIDE.md`) that takes a new user from install
-  to a first supervised agent run.
+v1.1 wires them in:
+- A profile declares **meters**.
+- The app measures them on every vision tick.
+- The planner sees `hp: 42%` in its prompt.
+- `expect`, `stop_when` and rules can use threshold conditions
+  (`below` / `above`) and change conditions (`rises` / `falls`).
+- `scripts/meters.py` helps calibrate a meter from a snapshot.
 
 Design decisions (made by Claude on 2026-09-25 under the user's standing grant
 of full autonomy):
-- An agent run *is* a planner session. The budget and the goal condition
-  apply to every planner session, however it was started, and a run ends on
-  every planner stop path (v0.8 session end).
-- Expectations live next to the skill in `profile.json` but are parsed into a
-  separate observation-only table. `agent/skills.py` does not change.
-- The effect of a step is a separate session-log record (`effect`), written
-  when it resolves, so v0.8 logs stay valid.
+- **No OCR in v1.1.** It needs Tesseract and `pytesseract` installed (an
+  external download) and is less reliable. It stays a later candidate.
+- **One idea of "unknown".** A reading below the meter's `min_confidence` is
+  written to `GameState` as invalid (`visible` false, `value` None), the same
+  as a ROI outside the frame. Conditions therefore only need to ask "is there
+  a valid value", and they carry no confidence of their own.
+- **Change conditions** (`rises` / `falls`) compare against the meter's last
+  valid reading taken *before the step was submitted*. `main.py` records
+  that reading when it submits the step. With no valid baseline, the effect
+  is `not_seen` at once (fail closed). This refines the kickoff sketch, which
+  compared against the first reading after the step. A potion that works at
+  once would already show in that reading, so the rise would never be seen.
+- Meter names share one namespace with detectors, because both are keys in
+  `GameState`.
 
 ## Design constraint (read before implementing anything)
 
-1. **Observation never adds input.**
-   - Expectations, effect watches, preflight, the run budget and the goal
-     condition only read `GameState`, the profile and the clock. They never
-     build an `ActionIntent`, never call `SkillBook.build_intent`, the
-     `SkillExecutor` or the `ActionDispatcher`.
-   - `agent/skill_effects.py` and `agent/agent_session.py` never import
-     `skills`, `rule_engine`, `autopilot`, `skill_executor`,
-     `action_dispatcher`, `core.input_controller` or `pydirectinput`. A test
-     enforces this.
-2. **Stops only reduce activity.**
-   - The budget, the goal condition and a failed preflight can stop the
-     planner or refuse to start it. They never enable input control, a skill,
-     a rule or auto mode.
-   - Start Agent never turns on input control or auto mode. Both stay
-     explicit user actions, and auto still needs its confirmation dialog.
-   - `not_seen` can only turn auto off sooner (it counts toward the v0.7
-     3-failures stop). It never retries a step.
-3. **Expectations are bounded** (`agent/skill_effects.py`):
-   - `expect` is `{"detector": <declared detector>, "visible": true|false,
-     "within_seconds": (0, 10], "min_confidence": [0, 1]}`. The defaults are
-     `visible` true, `within_seconds` 2.0 and `min_confidence` 0.8. Unknown
-     fields and undeclared detectors are rejected on load.
-   - Only an observation made *after the step finished* counts. A step that
-     did not run (refused, failed, cancelled) gets no watch and no effect.
-   - Effects are `confirmed`, `not_seen` or `none` (no expectation).
-4. **At most one effect watch, on the Tk thread.**
-   - The watch is polled from `_poll_preview`. No new thread.
-   - While a watch is pending the planner does not call Ollama, just as it
-     waits for a pending proposal or a running skill (v0.7 gate).
-   - F8, input off, planner stop, profile load and Clear Rules drop the watch
-     without recording an effect.
-5. **Runs are bounded.**
-   - `planner.max_run_minutes`: default **15**, hard cap **120**. At the
-     limit the planner stops, auto turns off and the session ends with
-     "run budget reached".
-   - `planner.stop_when`: `{"detector": <declared detector>, "visible":
-     true|false, "min_confidence": [0, 1]}`, default none. It is met only by a
-     fresh observation (at most 1.0 s old) made after the run started. Then
-     the planner stops, auto turns off and the session ends with
-     "goal reached".
-   - Preflight's network check (Ollama `/api/tags`) runs off the Tk thread
-     with the profile's timeout, and its result is applied on the Tk thread.
-6. **F8 / window close:** input off → `executor.cancel()` → stop the planner
-   (drops the proposal, the effect watch and the run, turns auto off, cancels
-   the sinks) → end the session log → stop recording. The v0.8 order is
-   unchanged.
-7. The v0.4–v0.8 invariants still hold: the planner invariant, the skill
-   invariant, the memory invariant and "recording only listens". Skills are
-   disabled by default. A profile loads only while input control is off.
-   `profiles/*` and `memory/` are gitignored (except
-   `profiles/example/profile.json`).
+1. **Meters only read.**
+   - Measuring a meter, writing it to `GameState` and checking a meter
+     condition never build an `ActionIntent` directly. They never call
+     `SkillBook.build_intent`, the `SkillExecutor` or the
+     `ActionDispatcher`.
+   - The only path from a meter to input is the one that already exists: a
+     `MeterRule` (or the planner) names a profile skill, and that skill goes
+     through permissions and the `ActionDispatcher` like any other.
+   - `agent/meter_conditions.py` never imports `skills`, `rule_engine`,
+     `autopilot`, `skill_executor`, `action_dispatcher`,
+     `core.input_controller` or `pydirectinput`. The observation-boundary
+     test enforces this.
+2. **Fail closed.** A meter condition is false when the reading is missing,
+   invalid (`value` None), not a finite number in [0, 1], not from
+   `vision:resource_bar`, or stale. So:
+   - a `MeterRule` does not fire;
+   - an `expect` ends `not_seen`;
+   - a `stop_when` is not met.
+3. **Bounded, user-written conditions.**
+   - Thresholds (`below` / `above`) are numbers strictly between 0 and 1.
+   - Deltas (`rises` / `falls`) are numbers in (0, 1].
+   - Exactly one comparison per condition.
+   - Unknown fields and undeclared meters are rejected on load.
+   - The model can never define or change a meter, a threshold or a rule. It
+     can only enable or disable rules the profile already has (v0.4).
+4. **Meter rules fire skills only.**
+   - A `MeterRule` always uses `SKILL_RULE_ACTION` with a profile skill.
+   - It has a cooldown and an observation-age check, the same as
+     `VisibilityRule`.
+   - `enable_rule` / `disable_rule` / Clear Rules / F8 treat it exactly like
+     a visibility rule.
+5. **Measuring stays cheap and on the vision tick.**
+   - Meters are measured in `_run_vision_if_due`, right after
+     `detect_all`, on the same frame and with the same timestamp.
+   - No new thread.
+   - A measurement error for one meter marks that meter invalid and logs
+     once; it never stops the vision loop.
+6. All v0.3–v1.0 invariants still hold: the agent, memory, planner and skill
+   invariants, and "recording only listens".
+   - F8 order is unchanged.
+   - Skills are disabled by default.
+   - A profile loads only while input control is off.
+   - v1.0 profiles (detectors only) load and behave exactly as before.
 
-## Observed effects (`agent/skill_effects.py`)
+## Profile: the `meters` block
 
-- `Expectation(detector, visible=True, within_seconds=2.0,
-  min_confidence=0.8)`, validated in `__post_init__`.
-- `parse_expectation(block, detector_names) -> Expectation`.
-- `EffectWatch(skill_name, expectation, finished_at)`:
-  `check(state, now) -> "pending" | "confirmed" | "not_seen"`.
-  - `visible: true` is confirmed by an observation with `visible` and
-    `confidence >= min_confidence`, observed after `finished_at`.
-  - `visible: false` is confirmed by an observation observed after
-    `finished_at` that is not visible or below `min_confidence`.
-  - After `finished_at + within_seconds` with no match: `not_seen`.
-- `GameProfile.expectations: Mapping[str, Expectation]` (skill name →
-  expectation). `save_profile` writes `expect` back into the skill block.
+```json
+"meters": [
+  {"name": "hp", "roi": [20, 40, 200, 12],
+   "colors": [{"lower": [0, 120, 80], "upper": [10, 255, 255]}],
+   "direction": "left_to_right", "min_confidence": 0.5}
+]
+```
 
-## Agent runs (`agent/agent_session.py`)
+- `name`: the same name rules as detectors, and unique across detectors and
+  meters.
+- `roi`: required, `[x, y, width, height]` in frame pixels (reuse
+  `_parse_roi`, but null is not allowed). It should cover the bar's fill area
+  only, not its frame.
+- `colors`: 1–4 HSV ranges in OpenCV units (H 0–179, S and V 0–255), each
+  `{"lower": [h, s, v], "upper": [h, s, v]}` with lower ≤ upper per channel.
+  Red wraps around hue 0, so it usually needs two ranges.
+- `direction`: `left_to_right` (default), `right_to_left`, `top_to_bottom`
+  or `bottom_to_top`.
+- `min_confidence`: [0, 1], default 0.5.
+- `agent/profile.py`:
+  - `MeterDefinition(name, roi, colors, direction, min_confidence)`;
+  - `.spec() -> ResourceBarSpec`;
+  - `GameProfile.meters: tuple[MeterDefinition, ...]` (default empty);
+  - `save_profile(meters=...)` writes the block back, and Save → Load is a
+    round trip.
+  - A profile without `meters` is valid.
 
-- `PreflightFacts`: profile name or None, capture running, window title,
-  planner settings present, Ollama result (ok / detail), enabled skill names,
-  input control on, goal text.
-- `run_preflight(facts) -> PreflightReport` with `PreflightCheck(name, ok,
-  required, detail)`. Required: profile loaded, capture running, planner
-  settings present, Ollama reachable with the model, at least one enabled
-  skill. Advisory: input control on (steps are refused until it is), goal
-  set.
-- `RunBudget(max_seconds, started_at)`: `remaining(now)`, `expired(now)`.
-- `GoalCondition(detector, visible=True, min_confidence=0.8)`:
-  `met(state, started_at, now)`.
-- `AgentRun(budget, goal)`: `stop_reason(state, now) -> str | None` and a
-  status line for the panel.
-- `agent/ollama_client.py`: `OllamaClient.check_model() -> OllamaResult`
-  (`GET /api/tags`, the configured model must be listed).
+## Conditions (`agent/meter_conditions.py`, new, pure)
 
-## Loop integration
+- `meter_value(observation, *, now=None, max_age=None) -> float | None`.
+  - Returns the fill fraction only for a valid, finite
+    `vision:resource_bar` reading in [0, 1].
+  - When `now` and `max_age` are given, the reading must also be at most
+    `max_age` seconds old.
+  - Otherwise it returns None.
+- `gate_measurement(measurement, min_confidence) -> ResourceBarMeasurement`.
+  It returns an invalid measurement when the confidence is below
+  `min_confidence`, and the measurement unchanged otherwise.
+- `MeterThreshold(meter, below=None, above=None)`.
+  - Exactly one of `below` / `above`, strictly inside (0, 1).
+  - `holds(value) -> bool`.
+  - `describe()`, e.g. `hp below 30%`.
+  - `to_block()`.
+- `MeterChange(meter, rises=None, falls=None)`.
+  - Exactly one of `rises` / `falls`, in (0, 1].
+  - `holds(baseline, value) -> bool`.
+  - `describe()`, e.g. `hp rises by 10%`.
+  - `to_block()`.
+- `parse_meter_condition(block, meter_names, *, allow_change: bool, extra_fields=())`.
+  - Strict: unknown fields are rejected, the meter must be declared, and
+    there must be exactly one comparison.
+  - It is shared by `expect`, `stop_when` and meter rules. `extra_fields`
+    lets each caller keep its own options, such as `within_seconds`.
 
-- `StepRecord` gains `effect` (`none` / `confirmed` / `not_seen`). The
-  prompt's recent-steps lines show it, e.g.
-  `type_x (approved) → DONE, effect confirmed (x_glyph visible)`.
-- Session log: a new record type `effect` with `skill`, `effect`
-  (`confirmed` / `not_seen`), `detector` and `waited_s`. Old logs stay valid.
-- Autopilot: a step with an expectation calls `record_result` once, when the
-  effect resolves, with `ok and effect != "not_seen"`.
-- `should_plan` also waits while an effect watch is pending.
+### `expect` (`agent/skill_effects.py`)
 
-## Profile additions
+- A skill's `expect` is either the v1.0 detector form or a meter form:
+  - `{"meter": "hp", "below"|"above": x, "within_seconds": s}`;
+  - `{"meter": "hp", "rises"|"falls": d, "within_seconds": s}`.
+- It is parsed into `MeterExpectation(condition, within_seconds=2.0)`, with
+  the same `within_seconds` bounds as v1.0.
+- `EffectWatch` accepts either kind of expectation and gains an optional
+  `baseline: float | None`.
+  - **Threshold form:** confirmed by a valid reading observed after
+    `finished_at` and no later than the deadline, for which `holds` is
+    true.
+  - **Change form:** confirmed when such a reading moved from the baseline
+    by at least the delta, in the stated direction. With no baseline it
+    resolves `not_seen` at once.
+  - Otherwise the effect is `not_seen` at the deadline.
+  - `EffectResult.detector` carries the meter name.
+- `GameProfile.expectations` holds both kinds, and `save_profile` writes both
+  back.
 
-- Skill blocks: optional `expect` (above).
-- `planner` block: `max_run_minutes` (number, default 15, (0, 120]) and
-  `stop_when` (above, default none). `load_planner_config` validates the
-  shape; `parse_profile` checks that the detector is declared.
-- `profiles/example/profile.json` shows the goal, the model and
-  `max_run_minutes`. `expect` and `stop_when` need detectors, whose template
-  images stay local, so `docs/USER_GUIDE.md` shows them instead.
+### `stop_when` (`agent/agent_session.py`, `agent/planner_config.py`)
+
+- `stop_when` is either the v1.0 detector form or
+  `{"meter": "hp", "below"|"above": x}`. Change conditions are not allowed
+  here.
+- It is parsed into `MeterGoal(condition)`. `met(state, started_at, now)`
+  needs a valid reading observed after the run started, no more than
+  `GOAL_FRESH_SECONDS` old, for which `holds` is true.
+- `check_goal_detector` becomes a check against both detector and meter
+  names. `describe()` / `to_block()` behave as in v1.0.
+
+## Meter rules (`agent/rule_engine.py`, `agent/profile.py`)
+
+- Profile rule with a `meter` instead of a `detector`:
+  `{"name": "auto_potion", "meter": "hp", "below": 0.3, "skill": "drink_potion",
+  "cooldown_seconds": 5, "max_observation_age_seconds": 0.75, "enabled": true}`.
+  - Exactly one of `detector` / `meter`.
+  - `min_confidence` is only allowed with `detector`.
+- `MeterRule(name, meter, below=None, above=None, skill,
+  max_observation_age_seconds=0.75, cooldown_seconds=1.0)`.
+  - It is frozen and validated.
+  - `action` is always `SKILL_RULE_ACTION`.
+  - `RuleEngine` holds both rule kinds in one list, and the names are
+    unique across both kinds.
+  - `evaluate` fires a meter rule only for a fresh, valid reading that
+    satisfies the threshold, respecting the cooldown and the disabled set.
+  - The `ActionIntent` has `detector_name` = the meter,
+    `confidence` = the reading's confidence, `target_bbox` None,
+    `skill_name` = the skill, and a reason such as
+    `hp 25% below 30%`.
+- `rule_engine` may import `meter_conditions`, never the reverse.
+- `_rule_block` writes both kinds, and the prompt's rules section describes a
+  meter rule by its condition.
+
+## App wiring (`main.py`, `agent/llm_planner.py`, `agent/agent_session.py`)
+
+- **Profile load / unload** keeps the loaded profile's `MeterDefinition`s
+  next to the detectors. Loading another profile or clearing it drops the
+  specs and the meters' `GameState` entries.
+- **`_run_vision_if_due`**, after `detect_all` on the same frame:
+  - run `measure_resource_bars` for each meter, then `gate_measurement`,
+    then `apply_resource_measurements` with the detection timestamp;
+  - an exception for one meter writes that meter invalid and logs once;
+  - a meter that turns valid or invalid is logged as `METER hp: 42%` /
+    `METER hp: unknown` (transitions only, not every tick);
+  - the Detectors line adds `hp=42%` or `hp=?`;
+  - rules are evaluated after the meters are written.
+- **Prompt** (`_format_observations`): a meter reading is shown as
+  `- hp: 42% (meter)`, or `- hp: unknown (meter)` when it is invalid,
+  instead of the raw observation fields. Detector lines are unchanged.
+- **Step submission:** for a skill whose `expect` is a change condition,
+  record the meter's `meter_value` at submit time and pass it as the watch's
+  baseline. The recent-steps line shows the effect as in v1.0, e.g.
+  `effect confirmed (hp rises by 10%)`.
+- **Preflight:** when the profile has meters, an advisory check `Meters`
+  lists each one (`hp 42%, mp unknown`). It is `[NOTE]` if any meter is
+  unknown and never blocks Start Agent.
+- **Save Profile** passes the loaded profile's meters, as it already does
+  for expectations.
+
+## Calibration tool (`scripts/meters.py`, read-only)
+
+- `suggest <snapshot.png> --roi x,y,w,h [--direction ...]`:
+  - reads the ROI, finds the dominant saturated hue of the filled part and
+    prints a suggested `colors` block;
+  - handles red's wrap around hue 0 by suggesting two ranges;
+  - prints a ready-to-paste `meters` entry.
+- `test <profile_dir> <snapshot.png>`:
+  - loads the profile without registering anything;
+  - measures every meter on the image;
+  - prints `name  percent  confidence  valid`;
+  - exits with 1 when the profile is invalid or a meter is unknown.
+- Snapshots come from the existing Save Snapshot button, and the tool never
+  writes a profile.
 
 ## Components
 
-- `agent/skill_effects.py` (new, pure).
-- `agent/agent_session.py` (new, pure).
-- `agent/profile.py`, `agent/planner_config.py`: the new fields.
-- `agent/step_history.py`, `agent/session_log.py`, `agent/autopilot.py`
-  callers, `agent/ollama_client.py`: as above.
-- `main.py`: the **Agent** panel (Preflight / Start Agent / Stop Agent, a
-  check list, a status line with time left, steps and effects, and the goal
-  state), the effect watch in `_poll_preview`, and the budget and goal stops.
-- `scripts/memory.py`: shows `effect` records.
-- `docs/USER_GUIDE.md` (new).
+- `agent/meter_conditions.py` (new, pure).
+- `agent/profile.py`: `meters`, the meter rule form and the meter
+  `expect` / `stop_when` forms.
+- `agent/skill_effects.py`, `agent/agent_session.py`,
+  `agent/planner_config.py`: meter expectations and goals.
+- `agent/rule_engine.py`: `MeterRule`.
+- `agent/llm_planner.py`: meter lines in the prompt, meter rules in the rules
+  section.
+- `main.py`: measuring, logging, the Detectors line, the step baseline, the
+  preflight note and save.
+- `scripts/meters.py` (new), `scripts/meter_demo.py` (new, task 6).
+- `docs/USER_GUIDE.md`: a "Meters" section.
+- `tests/`: new tests for every module above, and the observation-boundary
+  test extended to `agent/meter_conditions.py`.
 
 ## Checklist
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | Done | Claude | Issue #82, `feature/v1.0-personal-agent` from `main`, this file, `AGENTS.md` / `docs/HANDOFF.md` / `docs/ROADMAP.md`, draft PR feature→`main` (#84). Merged via PR #83. |
-| 1 | `agent/skill_effects.py` + profile `expect` | Done | Claude (Codex out of quota until 2026-09-25 13:55) | `tests/test_skill_effects.py` (17) + `tests/test_observation_boundary.py` (2). `Expectation` / `parse_expectation` / `EffectWatch` / `observation_matches`; `GameProfile.expectations` is a read-only mapping and `save_profile(expectations=)` writes `expect` back (the Save button passes the loaded profile's). An observation made after the deadline counts as `not_seen`. Parse/validate, defaults, unknown field and undeclared detector rejected, confirmed/not_seen for both `visible` values, observations before the finish ignored, save round-trip, import-boundary test. |
-| 2 | `agent/agent_session.py` + planner `max_run_minutes` / `stop_when` + `check_model` | Done | Claude | `tests/test_agent_session.py` (24). `PreflightFacts` / `run_preflight` / `PreflightReport` (required: profile, capture, planner settings, Ollama + model, enabled skill; advisory: input control, goal), `RunBudget`, `GoalCondition` (fresh ≤ 1.0 s, after the start), `AgentRun.stop_reason` / `status_line`. `GoalCondition` lives in `agent_session.py` (imported by `planner_config.py`, not the other way round); `parse_profile` and `save_profile` check the `stop_when` detector. `OllamaClient.check_model()` (`GET /api/tags`, untagged model matches `:latest`, new error kind `model_missing`). The observation-boundary test now requires both modules. |
-| 3 | Loop integration: step effect, prompt, `effect` log record, autopilot, planner gate | Done | Claude, safety-reviewer | `tests/test_main_effects.py` (12) + step-history / session-log / dispatcher tests. `StepRecord.effect` (`none` / `pending` / `confirmed` / `not_seen`) and `expected`; `StepHistory.set_effect`; the prompt line ends with `effect confirmed (x_glyph visible)` or `effect not seen (…)`. After a step that ran and whose skill has `expect`, `main.py` opens an `EffectWatch`, polled in `_poll_preview`. While it runs, `_effect_pending` closes the planner gate and the autopilot keeps the step as running, so a stray proposal is dropped. When it resolves, it writes the `effect` log record and counts `not_seen` as a failed step (3 in a row turn auto off). F8, input off, clear rules, planner off/restart and profile load drop the watch without an `effect` record. A hold cut short (`DispatchResult.interrupted`) or a step drained after input was switched off opens no watch. A step is never retried. |
-| 4 | UI Agent panel + budget / goal stops | Done | Claude, safety-reviewer | `tests/test_main_agent.py` (24). The Agent box has Preflight / Start Agent / Stop Agent, the check list and a run line (`Run: 14:32 left · 1 step(s) · effects 1 confirmed / 0 not seen · goal: x_glyph visible`). `check_model` runs on a worker thread and reports through a queue drained in `_poll_preview`. The other facts are re-read on the Tk thread when the result arrives, and a changed Model field fails the check. Start Agent only starts the planner: input control and auto mode are never touched. Every planner start is an `AgentRun`, whether from Start Agent or the checkbox, and every planner stop ends it. The run is built before the planner starts, so a running planner always has a budget. Every planner stop also cancels a running planner skill, so a held key is released. F8 or any planner stop during the check cancels a pending start. `_poll_agent_run` ends the session with `run budget reached` / `goal reached` through `_stop_planner_for`, so auto turns off and the session log ends with that reason. Stop Agent ends it with `agent stopped`. Steps (approved/auto steps that were submitted) and effects are counted. The Ollama settings are the Model field plus the profile's host, port and timeout. |
-| 5 | `docs/USER_GUIDE.md`, example profile, `scripts/memory.py` effects | Done | Claude | `docs/USER_GUIDE.md` covers install, a first run on Notepad, how a run ends, detectors + `expect` + `stop_when` for your own game, auto mode, session logs and troubleshooting by preflight message. The example profile now has a goal, the model, `auto_max_steps` 3 and `max_run_minutes` 5. It has no `expect` / `stop_when`, because those need detectors whose template images stay local (`test_example_profile_loads`). Load Profile now fills the Model field from the profile's `planner.model`. `scripts/memory.py show` prints `effect:` lines and an `effects: X confirmed / Y not seen` summary (`tests/test_memory_cli.py` +2, `tests/test_main_agent.py` +1). |
-| 6 | Live Windows smoke test | Done | Claude | Notepad + Ollama `qwen3.5:9b`: all 9 acceptance criteria passed on 2026-09-25 (58/58 checks, see "Smoke test results" below). Found and fixed a doc error: a goal already on screen *does* end a new run at once (`docs/USER_GUIDE.md`). |
-| R | Release close-out (v1.0.0) | Done | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.0.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #82. |
+| 0 | Kickoff | In progress | Claude | Issue #92, `feature/v1.1-meters` from `main`, this file, `AGENTS.md` meter invariant, `docs/HANDOFF.md` / `docs/ROADMAP.md`, draft PR feature→`main`. |
+| 1 | Profile `meters` block | Not started | Codex (else Claude) | `MeterDefinition`, `.spec()`, parse (ROI required, 1–4 colors, direction, `min_confidence`), shared namespace with detectors, `save_profile(meters=)` round trip, tests. |
+| 2 | `agent/meter_conditions.py` + meter `expect` / `stop_when` | Not started | Codex (else Claude) | `meter_value`, `gate_measurement`, `MeterThreshold`, `MeterChange`, `parse_meter_condition`; `MeterExpectation` + `EffectWatch` baseline; `MeterGoal`; v1.0 forms unchanged; observation-boundary test. |
+| 3 | `MeterRule` | Not started | Codex (else Claude) | `RuleEngine` evaluates both kinds (fresh, valid, cooldown, disabled set); profile rule form with `meter`; `_rule_block`; the prompt's rules section. |
+| 4 | `main.py` wiring | Not started | Claude, safety-reviewer | Measuring on each vision tick, gating, transition logs, Detectors line, prompt meter lines, the change baseline at submit, the preflight `Meters` note, Save passes the meters, load/unload. |
+| 5 | `scripts/meters.py`, USER_GUIDE, example | Not started | Codex (else Claude) | `suggest` / `test`, read-only, exit codes, tests on synthetic images; USER_GUIDE "Meters" section with an auto-potion example. |
+| 6 | Live Windows smoke test | Not started | Claude | `scripts/meter_demo.py` (below); the 9 acceptance criteria. |
+| R | Release close-out (v1.1.0) | Not started | Claude | CHANGELOG, README, ROADMAP, ARCHITECTURE, AGENTS, `APP_VERSION = "1.1.0"`, `setup.ps1` / `check_system.ps1` banners. Feature→`main` as a **merge commit**, which closes Issue #92. |
 
 Order: 0 → 1 → 2 → 3 → 4 → 5 → 6 → R.
 - Each task lands through a `claude/…` or `codex/…` sub-branch PR into
-  `feature/v1.0-personal-agent`.
+  `feature/v1.1-meters`.
 - Codex prompts must say to run **no git commands** (see the operational note
   in `docs/HANDOFF.md`).
 
-## Acceptance criteria (task 6, live on Notepad with Ollama `qwen3.5:9b`)
+## Smoke test target (task 6)
 
-1. Preflight lists every check. Start Agent refuses with a clear reason when
-   a required check fails (capture off, no enabled skill, Ollama unreachable
-   or model missing), and starts nothing.
-2. Start Agent starts the planner and its session log. It never turns on
-   input control or auto mode.
-3. A skill with `expect` gets effect `confirmed` when its detector changes as
-   expected and `not_seen` when it does not. The effect shows in the panel,
-   in the next prompt's recent steps and in the session log.
-4. In auto mode, three `not_seen` steps in a row turn auto off.
-5. No Ollama call starts while an effect watch is pending.
-6. The run budget ends the run ("run budget reached"), and `stop_when` ends
-   it when the goal detector is seen ("goal reached").
-7. F8 during a run stops everything in the v0.8 order and drops the watch.
-8. A profile with a bad `expect`, `stop_when` or `max_run_minutes` is
-   rejected with a clear error, and the example profile loads.
-9. All v0.3–v0.8 safety invariants still hold, `scripts/memory.py validate
-   --all` passes, and `git status` shows nothing under `memory/` or
-   `profiles/`.
+Notepad has no colored bar to measure. Task 6 adds `scripts/meter_demo.py`:
+- It is a small Tk window that belongs to this project, not a game, and holds
+  no user data.
+- It draws a red bar that drains by itself (about 2% per second).
+- The key `x` refills it by 20%, and the window shows its true percentage as
+  text for checking.
 
-## Smoke test results (task 6, 2026-09-25)
+It is the only window besides Notepad that the smoke test may send input
+to. A real game is never touched.
 
-Driven in-process against a throwaway Notepad tab with Ollama 0.34.3 and
-`qwen3.5:9b`. The only key ever sent was `x`, into Notepad. The test
-profiles (`smoke_v10*`) and their `x_glyph` template stayed under the
-gitignored `profiles/`, and their session logs under `memory/`. Each profile
-had `type_x` (`expect` x_glyph visible, 2 s) and `type_x_gone` (`expect`
-x_glyph gone, 3 s, which never happens because the x stays).
+## Acceptance criteria (task 6, live on `scripts/meter_demo.py`)
 
-| # | Criterion | Result |
-|---|-----------|--------|
-| 1 | Preflight lists every check; refusals | Pass. All 7 checks listed, input off only a `[NOTE]`, Preflight starts nothing. Start Agent refused, with the reason in the panel and the log, for capture off, no enabled skill, a missing model (`run: ollama pull …`) and Ollama unreachable (port 1). |
-| 2 | Start Agent starts only the planner | Pass. Planner and session log started; input control and auto mode stayed off. |
-| 3 | Effects `confirmed` / `not_seen` | Pass. Approve `type_x` → `confirmed` in 0.014 s; approve `type_x_gone` → `not_seen` after 3 s. Both show in the run line (`effects 1 confirmed / 1 not seen`), in the next prompt (`effect confirmed (x_glyph visible)`, `effect not seen (x_glyph gone)`) and as `effect` log records. |
-| 4 | 3 `not_seen` in auto turn auto off | Pass. Auto (cap 5) ran 3 `type_x_gone` steps, each `not_seen`, then turned off with "3 failed steps in a row". No retry. |
-| 5 | No Ollama call while a watch is pending | Pass. 6 watch intervals, 7 calls, 0 overlaps (sampled every 5 ms). |
-| 6 | Budget and goal end the run | Pass. A 0.5-minute budget ended the run after 30.0 s (`run budget reached`). With `stop_when` x_glyph, the first approved `type_x` ended the run (`goal reached`), auto off, input unchanged. |
-| 7 | F8 during a pending watch | Pass. Input off, planner stopped, auto off, watch dropped with a log line, the session ended with `emergency stop` and no `effect` record, and no Ollama request followed. |
-| 8 | Bad profiles rejected, example loads | Pass. Unknown `expect` detector, unknown `stop_when` field and `max_run_minutes` 0 each failed with a message naming the problem; the example loaded and filled the Model field. |
-| 9 | Invariants, validate, git status | Pass. `scripts/memory.py validate --all` 21/21 OK, `git status` clean apart from the doc fix, 675 tests pass (1 skipped), ruff clean. |
+1. The meter shows the right percentage (±5 points against the demo's own
+   number) on the Detectors line, in the prompt and in
+   `scripts/meters.py test`.
+2. A wrong ROI or wrong colors give `unknown`, and then no meter rule fires
+   and no meter goal is met.
+3. A `MeterRule` `hp below 0.3` fires the `refill` skill (key `x`) at most
+   once per cooldown, and only while input control is on.
+4. `expect` `{"meter": "hp", "rises": 0.1}` gives `confirmed` after a refill
+   and `not_seen` when the key is refused.
+5. `stop_when` `{"meter": "hp", "above": 0.9}` ends the run with
+   "goal reached".
+6. F8 stops the meter rule at once (input off, no further dispatch).
+7. A profile with a bad meter (bad ROI, bad color range, duplicate name,
+   unknown meter in `expect` / `stop_when` / a rule) is rejected with a clear
+   error.
+8. A v1.0 profile with detectors only behaves as before, and the example
+   profile loads.
+9. All v0.3–v1.0 safety invariants still hold, tests and ruff pass, and
+   `git status` shows nothing under `memory/`, `profiles/` or `snapshots/`.
 
-Notes:
-- The first runs shared the GPU with an emulator and a game (11.5 of 12.3 GB
-  in use). Ollama calls then took over 30 s and hit the default timeout, so
-  the smoke profiles set `timeout_seconds` 240. With the GPU free, a cycle
-  took about 3 s.
-- One run also showed that the smoke scenario must reject a proposal that was
-  made before the enabled skills changed. That is correct app behaviour: a
-  pending proposal is not re-planned when skills change, and approving it is
-  still checked against the enabled skills at run time.
-- The goal check uses fresh per-frame observations, so a goal detector that
-  is already visible ends a new run at once. `docs/USER_GUIDE.md` said the
-  opposite and was fixed.
+## Explicitly out of scope for v1.1
 
-## Explicitly out of scope for v1.0
-
-- Sending frames or screenshots to an LLM (multimodal planning).
-- Learning skills from recordings, or the LLM defining new skills, keys,
-  coordinates or durations.
-- Retrying a step automatically because its effect was not seen.
-- Multi-step goals, goal trees or scheduling runs.
+- OCR of numbers or text (needs Tesseract; a later candidate).
+- Multiple templates per detector, object detection, or sending frames to an
+  LLM.
+- Meters or conditions defined by the model, and arithmetic between meters.
+- Retrying a step because its effect was not seen.
 - Anti-cheat bypassing, protected-process evasion, memory injection, packet
   manipulation, credential theft, or stealth/persistence behavior. This is a
   standing invariant from `AGENTS.md`.

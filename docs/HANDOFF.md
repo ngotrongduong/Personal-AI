@@ -16,12 +16,32 @@ file and `docs/PLAN.md` in the same push as the work.
    live GUI/capture/input behavior, which CI cannot exercise.
 4. Update this file and `docs/PLAN.md` before stopping if the picture changed.
 
-## Right now (2026-09-25)
+## Right now (2026-09-27)
+
+**v1.1 "Meters" (Issue #92) is in progress** on `feature/v1.1-meters`,
+branched from `main` at the v1.0.0 release (`80bedca`). Task 0 (kickoff) is
+under way:
+- Issue #92;
+- the branch;
+- the `docs/PLAN.md` spec with its design constraint and acceptance
+  criteria;
+- the `AGENTS.md` meter invariant;
+- the draft release PR feature→`main`.
+
+v1.1 wires the v0.3 resource-bar measurement into the app:
+- profile `meters` are measured on every vision tick;
+- the planner sees percentages;
+- `expect`, `stop_when` and rules gain meter conditions that fail closed.
+
+Claude settled the design on 2026-09-25 under the user's standing grant of
+full autonomy (see `docs/PLAN.md` "Design decisions"). The user asked on
+2026-09-27 to try Codex again through the Codex plugin for Claude Code
+(`openai/codex-plugin-cc`, the `codex:codex-rescue` agent). Tasks 1, 2, 3 and
+5 go to Codex first; Claude takes over if Codex fails.
 
 **v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
 branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge
-commit, which closed Issue #82. `main` has `APP_VERSION = "1.0.0"`. No
-milestone after v1.0 is planned yet (see `docs/ROADMAP.md` "Next").
+commit, which closed Issue #82. `main` has `APP_VERSION = "1.0.0"`.
 
 ### v1.0 history (for reference)
 
@@ -482,10 +502,10 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-None scheduled. v1.0 is released. The next milestone needs scoping first:
-open an issue, create a `feature/<milestone>` branch from `main`, and write
-its spec with a design constraint and acceptance criteria in
-`docs/PLAN.md`. Candidates are in `docs/ROADMAP.md` "Next".
+v1.1 task 1: the profile `meters` block (`MeterDefinition`, `.spec()`,
+strict parsing, one namespace with detectors, `save_profile(meters=)` round
+trip, tests). See `docs/PLAN.md`. Then tasks 2–5, the smoke test on
+`scripts/meter_demo.py`, and the v1.1.0 release.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -521,7 +541,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-None. Issue #82 (v1.0), Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
+Issue #92 (v1.1 Meters) is open. Issue #82 (v1.0), Issue #71 (v0.8), Issue #61 (v0.7), Issue #50 (v0.6), Issue #41 (v0.5), Issue #15 (v0.4),
 Issue #1 (v0.3) and Issue #4 are all completed and closed.
 
 ## Lessons
