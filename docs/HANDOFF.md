@@ -18,11 +18,13 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-28)
 
-**v1.1 "Meters" (Issue #92) is the active milestone** on
-`feature/v1.1-meters`; draft release PR #94 tracks integration into `main`.
-Only Task R (release) is left.
+**v1.1.0 "Meters" (Issue #92) is released.** The integration branch
+`feature/v1.1-meters` merges into `main` via PR #94 as a merge commit, which
+closes Issue #92. `main` has `APP_VERSION = "1.1.0"`. No milestone after v1.1
+is planned yet; see `docs/ROADMAP.md` "Later" for candidates and scope a new
+milestone in `docs/PLAN.md` before implementing anything.
 
-Merged with green Windows CI:
+v1.1 work, merged with green Windows CI:
 - Task 0 kickoff — PR #93.
 - Task 1 profile `meters` schema — PR #95.
 - Task 2 pure fail-closed meter conditions plus meter `expect` / `stop_when` — PR #96.
@@ -41,22 +43,19 @@ Merged with green Windows CI:
   profile's meters with the detectors' timestamp; a clipped ROI or a
   measurement error makes that meter invalid (`hp=?`); prompt, status line
   and an advisory preflight `Meters` note show confident fresh readings.
-- Task 6 live Windows smoke test (Claude, branch `claude/v1.1-smoke`):
-  46/46 checks, all 9 acceptance criteria passed — see `docs/PLAN.md`
-  "Smoke test results". `scripts/meter_demo.py` is now DPI aware and turns
-  its own IME off (a Vietnamese IME swallowed its keys).
+- Task 6 live Windows smoke test — PR #103: 46/46 checks, all 9 acceptance
+  criteria passed — see `docs/PLAN.md` "Smoke test results".
+  `scripts/meter_demo.py` is now DPI aware and turns its own IME off (a
+  Vietnamese IME swallowed its keys).
+- Task R release — CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS,
+  `APP_VERSION` 1.1.0 and the setup/check banners, then PR #94 as a merge
+  commit.
 
-Next: Task R — CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS, `APP_VERSION`
-1.1.0 and the setup/check banners, then merge PR #94 as a merge commit.
 Before any live planner run, prewarm Ollama: a cold `qwen3.5:9b` load can
 exceed the planner timeout.
 
-Do not duplicate Tasks 1–3 or Task 5 without checking the active branches/PRs.
-
-**v1.0.0 "Personal Game Agent" (Issue #82) is released.** The integration
-branch `feature/v1.0-personal-agent` merged into `main` via PR #84 as a merge
-commit, which closed Issue #82. `main` has `APP_VERSION = "1.0.0"`. No
-milestone after v1.0 is planned yet (see `docs/ROADMAP.md` "Next").
+**v1.0.0 "Personal Game Agent" (Issue #82) is released** (PR #84, merge
+commit).
 
 ### v1.0 history (for reference)
 

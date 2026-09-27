@@ -352,6 +352,47 @@ can stop the planner, turn auto off or refuse a start; they never turn input
 control, auto mode or a skill on. `tests/test_observation_boundary.py` checks
 that the observation modules never import the input path.
 
+## v1.1 meters
+
+```text
+profile "meters" ──► MeterDefinition(name, roi, hsv_ranges, …) ──► ResourceBarSpec
+vision tick (Tk thread) ── frame ──► detect_all ──┐ same observed_at
+                           frame ──► measure_meters (agent/meter_live.py)
+                                     └─ clipped ROI / error ──► invalid ("hp=?")
+                           ──► apply_resource_measurements ──► GameState["hp"]
+                                  (value 0–1, confidence, source "vision:resource_bar")
+GameState ──► accepted_meter_value (valid, fresh, confident) ──► MeterCondition
+          ├─► MeterRule (cooldown, freshness) ──► declared skill ──► SkillExecutor
+          ├─► EffectWatch (expect below/above/rises/falls, step-end baseline)
+          ├─► GoalCondition (stop_when below/above) ──► "goal reached"
+          └─► planner prompt "- hp: 42% (meter, confidence 0.97)" / "unknown"
+```
+
+- `agent/profile.py`: `MeterDefinition` parses and saves the `meters` block.
+  Detector and meter names share one namespace; a duplicate is rejected on
+  load, and a meter name is refused as a UI click-rule or detector target.
+- `agent/meter_conditions.py`: `MeterCondition` (one declared meter, exactly
+  one of `below` / `above` / `rises` / `falls`, amounts in [0, 1]) and
+  `parse_meter_condition`. Every evaluation goes through
+  `accepted_meter_value`, which returns `None` for a missing, invalid, stale
+  or low-confidence reading, so every condition fails closed.
+- `agent/rule_engine.py`: `MeterRule` can only start its declared, enabled
+  skill (`SKILL_RULE_ACTION`) with a cooldown and a freshness limit. Change
+  rules compare consecutive accepted fresh samples; disabling a rule resets
+  its baseline.
+- `agent/meter_live.py` and `main.py`: meters are measured on every vision
+  tick with the detectors' timestamp; each meter is isolated, so one failing
+  meter does not hide the others. Vision skips frozen frames after a capture
+  error. The status line, the prompt and the preflight `Meters:` note show
+  only confident fresh readings.
+- `scripts/meters.py` (`suggest` / `test`) works on saved snapshots and never
+  writes a profile.
+
+Meter invariant: meters only read. The profile, never the model, defines
+meters, thresholds and rule targets, and a meter rule still runs through
+SkillExecutor → ActionDispatcher → InputController. The boundary tests check
+that the meter modules never import the input path.
+
 ## Why the LLM is not in the fast loop
 
 The local LLM sits above the deterministic rule layer. It can choose goals or

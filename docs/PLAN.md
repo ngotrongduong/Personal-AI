@@ -1,6 +1,7 @@
 # v1.1 detailed plan — Meters
 
-**Status: active** on `feature/v1.1-meters` (Issue #92).
+**Status: released** as v1.1.0 — `feature/v1.1-meters` merged into `main`
+via PR #94 (merge commit), closing Issue #92.
 
 v1.1 turns the existing v0.3 resource-bar primitive into a first-class profile
 observation. A game profile can declare meters such as HP, mana, stamina or
@@ -159,8 +160,8 @@ Existing detector forms remain valid and unchanged.
 | 3 | `MeterRule` | Done | ChatGPT (PR #97) | Skill-only rule; cooldown/freshness; consecutive accepted-sample change logic; float-boundary fix; baseline reset across disable/re-enable; green Windows CI. |
 | 4 | Live wiring | Done (PR #102) | Claude + Codex plugin | Every vision tick measures meters (same timestamp as detectors, clipped ROI/error → invalid, per-meter isolation, logs on valid/invalid transitions). Status line `hp=42%(0.97)`/`hp=?`, prompt `- hp: 42% (meter, …)`/`unknown`, advisory preflight `Meters` note, fresh step-end baseline for `rises`/`falls` expects. Safety review fixes: a meter reading is never a visibility-rule/click-skill target and its name is refused for UI click rules/detectors; the prompt and status show only confident fresh readings; vision skips frozen frames after a capture error. |
 | 5 | Meter tools/docs | Done | ChatGPT (PR #99) | Read-only `suggest`/`test`, USER_GUIDE and example; strict generated-option validation; clipped-ROI rejection; synthetic tests; green Windows CI. |
-| 6 | Windows smoke test | Done (this PR) | ChatGPT helper (PR #100) + Claude | Live run on Windows 11 with `scripts/meter_demo.py` and Ollama `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed (see "Smoke test results"). The demo is now DPI aware and turns its own IME off. |
-| R | Release v1.1.0 | Not started | Shared | CHANGELOG/README/ROADMAP/ARCHITECTURE/version, green CI, release PR merge commit. |
+| 6 | Windows smoke test | Done (PR #103) | ChatGPT helper (PR #100) + Claude | Live run on Windows 11 with `scripts/meter_demo.py` and Ollama `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed (see "Smoke test results"). The demo is now DPI aware and turns its own IME off. |
+| R | Release v1.1.0 | Done (this PR + PR #94) | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/version, green CI, release PR merge commit. |
 
 ## Acceptance criteria
 
