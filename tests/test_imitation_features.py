@@ -3,7 +3,11 @@ from __future__ import annotations
 import cv2
 import numpy as np
 
+import pytest
+
 from imitation.features import (
+    PATCH_SIDE,
+    cell_patch_similarity,
     patch_at,
     patch_similarity,
     read_frame,
@@ -37,6 +41,31 @@ def test_patch_edges_are_replicated_and_similarity_handles_flat_patches() -> Non
     assert patch_similarity(corner, corner) == 1.0
     assert patch_similarity(np.full((8, 8), 20), np.full((8, 8), 28)) == 1.0
     assert patch_similarity(np.full((8, 8), 20), np.full((8, 8), 29)) == 0.0
+
+
+def test_cell_similarity_tolerates_a_small_occluder_like_the_cursor() -> None:
+    rng = np.random.default_rng(3)
+    patch = rng.integers(0, 256, (PATCH_SIDE, PATCH_SIDE), dtype=np.uint8)
+    occluded = patch.copy()
+    occluded[: PATCH_SIDE // 3, : PATCH_SIDE // 3] = 255
+    occluded[1:9, 1:3] = 0
+
+    assert cell_patch_similarity(patch, patch) == pytest.approx(1.0)
+    assert patch_similarity(occluded, patch) < 0.9
+    assert cell_patch_similarity(occluded, patch) == pytest.approx(1.0)
+    assert cell_patch_similarity(occluded, patch, keep=9) < 0.9
+    other = rng.integers(0, 256, (PATCH_SIDE, PATCH_SIDE), dtype=np.uint8)
+    assert cell_patch_similarity(other, patch) < 0.5
+
+
+def test_cell_similarity_rejects_bad_arguments() -> None:
+    patch = np.zeros((9, 9), dtype=np.uint8)
+    with pytest.raises(ValueError):
+        cell_patch_similarity(patch, np.zeros((6, 6), dtype=np.uint8))
+    with pytest.raises(ValueError):
+        cell_patch_similarity(patch, patch, keep=10)
+    with pytest.raises(ValueError):
+        cell_patch_similarity(np.zeros((2, 2)), np.zeros((2, 2)))
 
 
 def test_read_frame_supports_unicode_and_bad_images(tmp_path) -> None:

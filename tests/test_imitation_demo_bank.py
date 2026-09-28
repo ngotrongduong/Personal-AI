@@ -8,6 +8,7 @@ import cv2
 import numpy as np
 
 from imitation.demo_bank import DemoBank, extract_demo_clicks, select_sessions
+from imitation.features import PATCH_SIDE
 from recording.schema import (
     FORMAT_VERSION,
     FrameEvent,
@@ -88,7 +89,7 @@ def test_extracts_pre_click_frame_and_normalised_point(tmp_path) -> None:
     assert np.isclose(click.fx, 44 / 120)
     assert np.isclose(click.fy, 52 / 80)
     assert click.screen.shape == (48 * 48,)
-    assert click.patch.shape == (24, 24)
+    assert click.patch.shape == (PATCH_SIDE, PATCH_SIDE)
 
 
 def test_select_sessions_and_bank_counts_are_sorted(tmp_path) -> None:

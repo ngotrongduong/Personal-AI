@@ -85,6 +85,8 @@ def cmd_eval(args: argparse.Namespace) -> int:
         window = imitation.window_title
         sessions = imitation.sessions
         config = imitation.policy_config()
+    elif not window:
+        raise ImitationCliError("eval needs --window or --profile.")
 
     bank = _build_bank(args.recordings_root, window, sessions)
     report = evaluate(bank, config, mode=args.mode, gap_seconds=args.gap_seconds)
@@ -211,7 +213,10 @@ def build_parser() -> argparse.ArgumentParser:
 
     eval_command = commands.add_parser("eval", help="run leave-out offline evaluation")
     eval_command.add_argument("recordings_root", type=Path)
-    eval_command.add_argument("--window", required=True, help="window title (profile overrides it)")
+    eval_command.add_argument(
+        "--window",
+        help="case-insensitive window-title substring (required without --profile)",
+    )
     eval_command.add_argument("--sessions", type=_session_names, default=())
     eval_command.add_argument("--profile", type=Path, help="profile folder with imitation settings")
     eval_command.add_argument("--mode", choices=("loso", "loco"), default="loso")

@@ -8,7 +8,7 @@ import math
 import numpy as np
 
 from imitation.demo_bank import DemoBank, DemoClick
-from imitation.features import patch_at, patch_similarity, screen_feature
+from imitation.features import cell_patch_similarity, patch_at, screen_feature
 
 
 DenyZone = tuple[float, float, float, float]
@@ -16,7 +16,7 @@ DenyZone = tuple[float, float, float, float]
 
 @dataclass(frozen=True, slots=True)
 class PolicyConfig:
-    k: int = 5
+    k: int = 20
     screen_threshold: float = 0.92
     patch_threshold: float = 0.8
     cooldown_seconds: float = 3.0
@@ -137,7 +137,7 @@ class ImitationPolicy:
         patch_matches: list[_Candidate] = []
         for demo, similarity in screen_matches:
             live_patch = patch_at(frame_bgr, demo.fx, demo.fy)
-            local_similarity = patch_similarity(live_patch, demo.patch)
+            local_similarity = cell_patch_similarity(live_patch, demo.patch)
             if local_similarity >= self.config.patch_threshold:
                 patch_matches.append(_Candidate(demo, similarity, local_similarity))
         if not patch_matches:
