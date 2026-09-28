@@ -229,12 +229,12 @@ left click/tap.
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | In progress | Claude | Issue #115, `feature/v1.3-imitation`, this plan, imitation invariant, HANDOFF/ROADMAP, draft release PR. |
-| 1 | `imitation/features.py` + `imitation/demo_bank.py` | Done (PR pending) | Codex | Deterministic features and validated extraction with pre-click frame paths. |
-| 2 | `imitation/policy.py` | Done (PR pending) | Codex | Exact recorded points; abstention, deny-zone, cooldown, clustering and tie tests. |
-| 3 | `imitation/evaluate.py` + `scripts/imitation.py` | Done (PR pending) | Codex | LOSO/LOCO, readable summaries and atomic guarded `--out`; CLI smoke tests. |
-| 4 | Profile `imitation` block | Done (PR pending) | Codex | Strict parse/save/round-trip, Save preservation and input-boundary coverage. |
-| 5 | `main.py` Imitation panel + live wiring + safety review | Todo | Claude | Dry-run default; live behind every gate. |
+| 0 | Kickoff | Done (#116) | Claude | Issue #115, `feature/v1.3-imitation`, this plan, imitation invariant, HANDOFF/ROADMAP, draft release PR #117. |
+| 1 | `imitation/features.py` + `imitation/demo_bank.py` | Done (#118) | Codex | Deterministic features and validated extraction with pre-click frame paths. |
+| 2 | `imitation/policy.py` | Done (#118) | Codex | Exact recorded points; abstention, deny-zone, cooldown, clustering and tie tests. |
+| 3 | `imitation/evaluate.py` + `scripts/imitation.py` | Done (#118) | Codex | LOSO/LOCO, readable summaries and atomic guarded `--out`; CLI smoke tests. |
+| 4 | Profile `imitation` block | Done (#118) | Codex | Strict parse/save/round-trip, Save preservation and input-boundary coverage. |
+| 5 | `main.py` Imitation panel + live wiring + safety review | Done (PR pending) | Claude | `imitation/runner.py` worker threads; dry run by default; live only after confirmation, via `SkillExecutor` gates; tap `created_at` is the frame time. safety-reviewer blocker (live var set before the dialog answered) fixed with a separate confirmed flag. |
 | 6 | Real demos + offline eval + smoke on Merchant Guilds | Todo | Claude + user | The user records 10–20 min of demos; eval; dry run; harmless live taps only. |
 | R | Release v1.3.0 | Todo | Claude | Docs, version, merge commit. |
 

@@ -505,6 +505,27 @@ overwrite without `--overwrite`, and never writes inside a recording session.
 Precision measures how often a proposed point is right; coverage measures how
 often the policy proposes instead of safely abstaining.
 
+#### The Imitation panel
+
+1. Load the profile with the `imitation` block and press **Load Demos**. The
+   status line shows how many demo clicks came from how many recordings.
+2. **Start Capture** on the game window (its title must contain
+   `window_title`), then press **Start**. Imitation starts as a **dry run**:
+   on every recognised screen it only logs `Would tap (x, y) — …` and which
+   demo it copied. Nothing is sent to the game.
+3. Watch the dry run. If it proposes the wrong points, record more demos or
+   raise the thresholds instead of going live.
+4. To let it play, tick **Enable keyboard/mouse control**, then tick
+   **Live (send taps)** and confirm. Each tap goes through the same gates as
+   every skill: the profile's permissions and rate limit, the game window in
+   the foreground, the point inside the client area, a fresh frame. Points in
+   a deny-zone are never tapped.
+
+Live mode turns off by itself on F8, input off, a new recording, planner auto
+mode, a profile load, three failed taps in a row, or a change of the captured
+window (which also stops imitation). **Stop** ends imitation but keeps the
+loaded demos.
+
 ## 7. Troubleshooting
 
 | Preflight says | Do this |

@@ -211,6 +211,24 @@ class MainImitationPanelTests(unittest.TestCase):
         self.assertEqual(self.app._imitation_policy.config.deny_zones, self.config.deny_zones)
         self.assertTrue(self.app.imitation_start_button.instate(["!disabled"]))
 
+    def test_load_with_a_real_saved_profile(self) -> None:
+        import tempfile
+
+        from agent.profile import ImitationConfig, load_profile, save_profile
+
+        config = ImitationConfig(
+            window_title="Merchant Guilds",
+            min_interval_seconds=2.0,
+            deny_zones=((0.8, 0.0, 0.2, 0.1),),
+        )
+        with tempfile.TemporaryDirectory() as tmp:
+            self.app.profile = load_profile(save_profile(tmp, "Guilds", imitation=config))
+        self._load_demos()
+        self.assertEqual(self.app._imitation_policy.config.deny_zones, config.deny_zones)
+        self._capture()
+        self.app.start_imitation()
+        self.assertTrue(self.app._imitation_running)
+
     def test_empty_bank_does_not_enable_start(self) -> None:
         self.bank = DemoBank.from_clicks(())
         self.app.load_imitation_demos()
