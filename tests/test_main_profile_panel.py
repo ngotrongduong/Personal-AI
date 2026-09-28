@@ -17,8 +17,10 @@ from agent.profile import (
     load_profile,
     save_profile,
 )
+from agent.meter_conditions import parse_meter_condition
 from agent.rule_engine import SKILL_RULE_ACTION, RuleEngine, VisibilityRule
-from agent.skills import ClickSkill, PressSkill, SkillPermissions
+from agent.skill_requirements import DetectorRequirement, MeterRequirement
+from agent.skills import ClickSkill, PressSkill, SkillPermissions, TapSkill
 from main import PROFILE_NONE_TEXT, PersonalGameAIApp, collect_profile_contents
 from vision.detector_registry import DetectorSpec
 from vision.resource_bar import HSVRange
@@ -122,6 +124,25 @@ class CollectProfileContentsTests(unittest.TestCase):
 
         self.assertEqual([skill.name for skill in contents.skills], ["type_x"])
         self.assertEqual(contents.skipped_rules, ["auto_ok"])
+        self.assertEqual(contents.skipped_skills, ["press_ok"])
+
+    def test_tap_skills_are_dropped_only_when_a_required_detector_is_gone(self) -> None:
+        hp_low = MeterRequirement(parse_meter_condition({"meter": "hp", "below": 0.3}))
+        taps = [
+            TapSkill("plain", (0.5, 0.5)),
+            TapSkill("needs_ok", (0.5, 0.5), requires=(DetectorRequirement("ok"),)),
+            TapSkill("needs_lost", (0.5, 0.5), requires=(DetectorRequirement("lost", False),)),
+            TapSkill("needs_meter", (0.5, 0.5), requires=(hp_low,)),
+        ]
+        profile = mock.Mock(skills=taps, permissions=SkillPermissions())
+        templates = {"ok": (DetectorSpec("ok"), _template())}
+
+        contents = collect_profile_contents(templates, RuleEngine([]), profile)
+
+        self.assertEqual(
+            [skill.name for skill in contents.skills], ["plain", "needs_ok", "needs_meter"]
+        )
+        self.assertEqual(contents.skipped_skills, ["needs_lost"])
 
 
 class MainProfilePanelTests(unittest.TestCase):

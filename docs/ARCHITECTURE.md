@@ -191,10 +191,19 @@ SkillExecutor (one worker thread, one skill at a time)
 ActionDispatcher (allowlist re-check, foreground check, rate limit) → InputController
 ```
 
-- `agent/skills.py` defines `ClickSkill` / `PressSkill` / `HoldSkill`,
-  `SkillPermissions` and `SkillBook`. `FORBIDDEN_KEYS` (`f8`, the Windows keys,
-  `apps`) and `HARD_MAX_HOLD_SECONDS = 5.0` hold for every profile. A click
-  skill needs a visible, fresh, confident detector. Skills start disabled.
+- `agent/skills.py` defines `ClickSkill` / `PressSkill` / `HoldSkill` /
+  `TapSkill` (v1.2), `SkillPermissions` and `SkillBook`. `FORBIDDEN_KEYS` (`f8`,
+  the Windows keys, `apps`) and `HARD_MAX_HOLD_SECONDS = 5.0` hold for every
+  profile. A click skill needs a visible, fresh, confident detector. Skills
+  start disabled.
+- A tap skill taps a fixed profile point (`at`, fractions of the client area)
+  only when all its `requires` conditions (`agent/skill_requirements.py`:
+  detector visible/gone, meter above/below) hold on fresh observations.
+  The dispatcher maps the point into the live client area, requires the
+  foreground window and hit-tests the point (`window_owns_point`), and
+  `InputController.click` places the cursor with `SetCursorPos`, verifies
+  it, clicks, then moves the cursor back. Click and tap skills need a
+  running capture.
 - `agent/profile.py` has `load_profile`, `save_profile`, `list_profiles` and
   `profile_slug`.
   - Loading rejects unknown fields, duplicates, broken references and template

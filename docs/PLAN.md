@@ -104,10 +104,10 @@ imitation work in v1.3 its data.
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
 | 0 | Kickoff | In progress | Claude | Issue #107, `feature/v1.2-tap-demos`, this plan, tap invariant, HANDOFF/ROADMAP, draft release PR. |
-| 1 | `tap` skill: skills/profile/intent/dispatcher + `requires` | To do | Codex (else Claude) | Tests for parsing, round-trip, fail-closed `requires`, foreground and bounds gates. |
-| 2 | Cursor restore in `InputController.click` | To do | Codex (else Claude) | Injected get/set cursor for tests; restore even when the click raises. |
+| 1 | `tap` skill: skills/profile/intent/dispatcher + `requires` | Done (PR #110) | Codex + Claude | Tests for parsing, round-trip, fail-closed `requires`, foreground, bounds and hit-test gates. |
+| 2 | Cursor restore in `InputController.click` | Done (PR #110) | Codex + Claude | SetCursorPos + read-back before the click; restore outside the input lock, even when the click raises. |
 | 3 | Demo labeling (`recording/labels.py`, `recordings.py label`) | To do | Codex (else Claude) | Synthetic sessions in tests. |
-| 4 | `main.py` wiring + safety review | To do | Claude | describe_skill, Skills panel, prompt. |
+| 4 | `main.py` wiring + safety review | Done | Claude | describe_skill, capture allow-list (only key skills run without capture), auto foreground check, Save Profile drops/logs taps whose `requires` detector is gone. Safety review: no Critical/Important. |
 | 5 | Docs + example | To do | Codex (else Claude) | USER_GUIDE, example profile tap skill (no templates committed). |
 | 6 | Windows smoke test | To do | Claude | Pixel Dungeon ML: harmless taps only (no fights, permadeath); cursor restore fixes the LOST button. |
 | R | Release v1.2.0 | To do | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS/version, merge commit. |
