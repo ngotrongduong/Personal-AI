@@ -33,6 +33,11 @@ milestone.
 Pixel Dungeon has permadeath. Live tests there use harmless taps only,
 never fights.
 
+Task 3 (demo labeling) is done. `recording/labels.py` is pure: it maps
+recorded click, tap, press and hold inputs to profile skills and never imports
+the skill or input path. `scripts/recordings.py label` prints per-skill counts
+and can write guarded JSONL output.
+
 **v1.1.0 "Meters" (Issue #92) is released.** The integration branch
 `feature/v1.1-meters` merged into `main` via PR #94 as a merge commit, which
 closed Issue #92. v1.1.1 (PR #105) fixed the DPI layout.

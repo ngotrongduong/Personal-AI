@@ -394,6 +394,27 @@ The **Memory** box holds short notes that the planner sees as hints, e.g.
 permissions. Tick **Let the planner write notes** if the model may add its
 own.
 
+### Label your demos
+
+After recording yourself playing, compare the recorded clicks and key presses
+with a profile's skills:
+
+```powershell
+python scripts/recordings.py label <session|path> <profile>
+python scripts/recordings.py label <session|path> <profile> --out labels.jsonl
+```
+
+`<profile>` can be a folder name under `profiles/` or a path to a profile
+folder. The command prints per-skill counts. With `--out`, it also writes one
+JSON object per input; an existing file needs `--overwrite`. Clicks inside a
+fresh detector box match click skills, nearby fixed points match tap skills,
+and key durations distinguish press from hold skills. Use `--radius` to change
+the tap matching radius (the default is 0.03 of the client diagonal).
+
+Labeling is offline and read-only: it never captures a window, sends anything
+to the game, edits a profile or changes the recording. Output is refused
+inside `profiles/` and over the recording's own files.
+
 ## 7. Troubleshooting
 
 | Preflight says | Do this |
