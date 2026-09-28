@@ -17,8 +17,14 @@ from agent.action_dispatcher import DispatchResult
 from agent.profile import DetectorDefinition, RuleDefinition, save_profile
 from agent.rule_engine import SKILL_RULE_ACTION, ActionIntent, VisibilityRule
 from agent.skill_executor import SkillExecutor
-from agent.skills import ClickSkill, HoldSkill, PressSkill, SkillPermissions
-from main import SKILL_NO_RESULT_TEXT, SKILLS_NONE_TEXT, PersonalGameAIApp, describe_skill
+from agent.skills import ClickSkill, HoldSkill, PressSkill, SkillPermissions, TapSkill
+from main import (
+    SKILL_NO_RESULT_TEXT,
+    SKILLS_NONE_TEXT,
+    PersonalGameAIApp,
+    _capture_refusal,
+    describe_skill,
+)
 from vision.detector_registry import DetectorRegistry
 
 
@@ -88,7 +94,24 @@ class DescribeSkillTests(unittest.TestCase):
         self.assertEqual(describe_skill(ClickSkill("c", "ok")), "click ok")
         self.assertEqual(describe_skill(PressSkill("p", "x")), "press x")
         self.assertEqual(describe_skill(HoldSkill("h", "space", 1.5)), "hold space 1.5s")
+        self.assertEqual(describe_skill(TapSkill("t", (0.58, 0.47))), "tap (58%, 47%)")
         self.assertEqual(describe_skill(None), "unknown")
+
+
+class CaptureRefusalTests(unittest.TestCase):
+    def test_click_and_tap_need_capture(self) -> None:
+        click = ClickSkill("c", "ok")
+        tap = TapSkill("t", (0.5, 0.5))
+
+        self.assertIn("click skills", _capture_refusal(click, None) or "")
+        self.assertIn("tap skills", _capture_refusal(tap, None) or "")
+        self.assertIsNone(_capture_refusal(click, object()))
+        self.assertIsNone(_capture_refusal(tap, object()))
+
+    def test_key_skills_and_unknown_names_are_not_refused_here(self) -> None:
+        self.assertIsNone(_capture_refusal(PressSkill("p", "x"), None))
+        self.assertIsNone(_capture_refusal(HoldSkill("h", "x", 1.0), None))
+        self.assertIsNone(_capture_refusal(None, None))
 
 
 class MainSkillsPanelTests(unittest.TestCase):
@@ -258,6 +281,24 @@ class MainSkillsPanelTests(unittest.TestCase):
         self.focus.assert_not_called()
         self.assertEqual(self.fake.intents, [])
         self.assertIn("Start Capture first", self._result("press_ok"))
+
+    def test_tap_skill_needs_capture(self) -> None:
+        save_profile(
+            self.profiles_dir,
+            "Tap demo",
+            detectors=[],
+            skills=[TapSkill("tap_mid", (0.5, 0.5), enabled=True)],
+            rules=[],
+            permissions=SkillPermissions(),
+        )
+        self._load("tap_demo")
+        self._enable_input()
+
+        self.app.run_skill("tap_mid")
+
+        self.focus.assert_not_called()
+        self.assertEqual(self.fake.intents, [])
+        self.assertIn("Start Capture first; tap skills", self._result("tap_mid"))
 
     def test_click_skill_without_a_detection_is_blocked_without_focusing(self) -> None:
         _write_profile(self.profiles_dir)
