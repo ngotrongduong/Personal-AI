@@ -1,174 +1,264 @@
-# v1.2 detailed plan — Taps + demo labels
+# v1.3 detailed plan — Imitation (first target: Merchant Guilds)
 
-**Status: released as v1.2.0** (`feature/v1.2-tap-demos` → `main` via PR
-#109, merge commit; Issue #107).
+**Status: in progress** (`feature/v1.3-imitation`, Issue #115).
 
-v1.2 is the first step of the v1.2 → v2.0 track, which ends in an agent that
-learns from the user's own play (see `docs/ROADMAP.md`). Testing on a real
-game (Pixel Dungeon ML, 2026-09-28) showed two gaps:
+v1.2 gave recorded demos their first labels. v1.3 is the first milestone where
+the agent **copies the user's own play**: it looks at the live screen, finds
+the moments in the user's recordings that looked the same, and repeats the
+click the user made there.
 
-- most moves in a tile/touch game are taps on the map, which no skill type can
-  express. A click skill needs a detected template;
-- after a click skill, the cursor stays on the button. That changes how the
-  button looks, so its template match falls to 0 until the mouse moves.
+This is retrieval behaviour cloning. Nothing is trained and nothing is
+downloaded; the "model" is the user's own demo clicks plus two small image
+features per click. The first target is Merchant Guilds (an idle
+crafting/trading game in Google Play Games), where almost every action is a
+left click/tap.
 
-v1.2 adds a `tap` skill type and restores the cursor after every click. It also
-labels recorded demonstrations with the profile's skills, which gives the
-imitation work in v1.3 its data.
+## Design constraint (imitation invariant, permanent from v1.3)
 
-## Design constraint (tap invariant, permanent from v1.2)
-
-1. **The profile is the only source of a tap point.** A tap skill carries a
-   fixed point, `at: [fx, fy]`, as fractions (0..1) of the captured window's
-   client area. The LLM still chooses only a skill *name*; it never supplies
-   or changes a point.
-2. **Tap is fail-closed:**
-   - it runs only while the captured window is the foreground window, like key
-     skills, because nothing on screen confirms what is under a fixed point;
-   - every `requires` condition must hold on a fresh observation at intent
-     build time, or no intent is built;
-   - the point must fall inside the live client area when dispatched.
-3. **Same gates as every skill.** A tap goes Skill → `SkillExecutor` →
-   `ActionDispatcher` → `InputController`:
-   - input on / F8;
+1. **Points come only from the user's own recorded clicks.** A proposed point
+   is exactly the normalised point of one recorded left click (never an
+   average, never from the LLM, never from a detector). The recordings used
+   are the ones the profile's `imitation` block selects.
+2. **Act only on a recognised screen.** A click is proposed only when the live
+   screen is similar to the screen before that demo click
+   (`screen_threshold`) **and** the image around the point still matches
+   (`patch_threshold`). Otherwise the policy abstains. An unknown screen never
+   produces input.
+3. **Deny-zones.** The profile lists rectangles (fractions of the client area)
+   that imitation never taps, e.g. the `$`/gem/shop buttons. They are checked
+   by the policy and again right before a live step is submitted.
+4. **Dry run by default.** Dry run only logs and shows what it would click.
+   Live mode is an unsaved checkbox. It needs input control on, and it turns
+   off on:
+   - F8 or input off;
+   - profile load;
+   - recording start;
+   - planner auto;
+   - a capture/window change;
+   - 3 failed steps in a row.
+5. **Same gates as every tap.** A live step is an
+   `ActionIntent(action="tap", tap_point=…)` submitted to `SkillExecutor` →
+   `ActionDispatcher` → `InputController`. That applies:
+   - input on and F8;
+   - foreground and hit-test;
    - intent freshness;
-   - rate limit;
-   - cancel;
-   - disabled by default.
-4. **Cursor restore never adds input.** After a click, `InputController`
-   moves the cursor back to where it was. That is a cursor move only, with no
-   button or key event. If reading the position fails, nothing is restored.
-5. **Labeling only reads.** `label` reads a recording and a profile. It never
-   sends input, never edits the profile, and writes a file only when `--out`
-   is given, never overwriting unless `--overwrite` is given. Labels are data
-   for later milestones; nothing in v1.2 acts on them.
+   - the profile rate limit;
+   - cancel.
+
+   On top of that, imitation keeps its own `min_interval_seconds` between
+   steps and a per-target cooldown.
+6. **Read-only data.** The `imitation/` modules never import the input path
+   (`core/`, `agent/action_dispatcher.py`, `agent/skill_executor.py`,
+   pynput, win32 input). They never write or delete a recording. The only
+   file they write is an eval report, and only with `--out`.
 
 ## Profile format
 
 ```json
-{"name": "step_right", "type": "tap", "at": [0.58, 0.47],
- "requires": [{"detector": "btn_wait", "visible": true},
-              {"meter": "hp", "above": 0.3}],
- "max_observation_age_seconds": 0.75,
- "enabled": false,
- "expect": {"detector": "btn_wait", "visible": true}}
+"imitation": {
+  "window_title": "Merchant Guilds",
+  "sessions": [],
+  "k": 5,
+  "screen_threshold": 0.92,
+  "patch_threshold": 0.8,
+  "cooldown_seconds": 3.0,
+  "min_interval_seconds": 1.5,
+  "deny_zones": [[0.0, 0.0, 0.25, 0.08]]
+}
 ```
 
-- `at`:
-  - exactly 2 finite numbers in `[0, 1]` (bools rejected);
-  - the dispatcher maps it to `left + min(int(fx * width), width - 1)`, and
-    the same for `y`.
-- `requires`:
-  - optional, at most 4 conditions;
-  - a condition is either a detector condition
-    `{"detector", "visible", "min_confidence"}` or a meter threshold
-    `{"meter", "below"|"above", "min_confidence"}`;
-  - `rises` / `falls` are rejected here, because nothing gives them a
-    baseline;
-  - names must be declared detectors / meters.
-- `max_observation_age_seconds`:
-  - how fresh each `requires` observation must be;
-  - default 0.75 s, the same as click skills.
-- Save/Load round-trips a tap skill unchanged.
+- The block is optional; a profile without it loads as before.
+- `window_title`: a non-empty string. A recording is used when its
+  `session.json` `window_title` contains it (case-insensitive).
+- `sessions`: optional folder names under `recordings/` (plain names, no path
+  separators). When non-empty, only these are used; they must still match
+  `window_title`.
+- `k`: an integer from 1 to 20.
+- `screen_threshold`, `patch_threshold`: numbers in (0, 1].
+- `cooldown_seconds`: from 0 to 60.
+- `min_interval_seconds`: from 0.5 to 60.
+- `deny_zones`: at most 16 zones. Each is `[x, y, w, h]` as fractions, with
+  `w, h > 0`, `x + w <= 1` and `y + h <= 1`.
+- Unknown keys and bools-as-numbers are rejected. Save/Load round-trips the
+  block unchanged.
 
 ## Components
 
-- `agent/skills.py`:
-  - `TapSkill`;
-  - `SkillBook.build_intent` for taps (checks `requires`, builds
-    `ActionIntent(action="tap", tap_point=(fx, fy))`).
-- `agent/skill_requirements.py`: pure, fail-closed `requires` parsing and
-  evaluation. It never imports the input path.
-- `agent/rule_engine.py`: `ActionIntent.tap_point`.
-- `agent/profile.py`: parse and save `tap` skills.
-- `agent/action_dispatcher.py`: a `tap` branch with the foreground gate,
-  client-area resolution and bounds check, rate limit, cancel and click.
-- `core/input_controller.py`: `click` restores the cursor.
-- `recording/labels.py` + `scripts/recordings.py label`:
-  - a mouse-button `down` inside a fresh visible detector bbox → that
-    detector's click skill;
-  - a click within `--radius` (default 0.03 of the client diagonal) of a tap
-    point → the nearest tap skill;
-  - a key `down` → the press or hold skill with that key (hold when it was
-    held at least half the hold time);
-  - anything else → `unlabeled` with its normalized point;
-  - the output is per-skill counts, plus an optional JSONL file.
-- `main.py`:
-  - `describe_skill` for taps (`tap (58%, 47%)`);
-  - Skills panel Run;
-  - planner prompt skill lines.
-- `docs/USER_GUIDE.md`: a "Tap skills" section and a "Label your demos"
-  section.
+### `imitation/features.py` (pure numpy/cv2)
+
+- `screen_feature(frame_bgr, side=48) -> np.ndarray`:
+  - grayscale;
+  - `cv2.resize(..., (side, side), INTER_AREA)`;
+  - float32, zero-mean, L2-normalised and flattened;
+  - an all-flat frame gives the zero vector.
+- `screen_similarity(a, b) -> float`: the dot product, clamped to [-1, 1]. A
+  zero vector gives 0.0.
+- `patch_at(frame_bgr, fx, fy, fraction=0.08, side=24) -> np.ndarray`:
+  - a square crop centred on the point, with side
+    `max(8, round(fraction * min(h, w)))`;
+  - pixels outside the frame are filled by edge replication, so every point in
+    [0, 1] works;
+  - then grayscale, resized to `side` x `side`, as uint8.
+- `patch_similarity(a, b) -> float`: normalised cross-correlation in [-1, 1].
+  - If both patches are flat (std < 2), the result is 1.0 when the mean
+    difference is ≤ 8, else 0.0.
+  - If only one is flat, the result is 0.0.
+- Frames are read with `cv2.imdecode(np.fromfile(path, np.uint8), IMREAD_COLOR)`
+  so non-ASCII paths work. An unreadable image gives `None`, never an
+  exception.
+
+### `imitation/demo_bank.py`
+
+- `DemoClick` (frozen dataclass) has these fields:
+  - `session` (folder name), `t`, `frame_index`, `frame_path`;
+  - `fx`, `fy`: normalised by `session.json` `client_width/height`, clamped to
+    [0, 1];
+  - `screen` (`np.ndarray`, float32) and `patch` (`np.ndarray`, uint8).
+- `extract_demo_clicks(session_dir, *, lead_seconds=0.05, max_frame_age=0.5, drag_fraction=0.02, patch_fraction=0.08) -> ExtractResult(clicks, skipped)`:
+  - loads with `recording.dataset.load_session`;
+  - a session whose report has errors is skipped whole (`skipped["invalid_session"]`);
+  - considers every mouse_button `down` with `button == "left"`, and pairs it
+    with the next left `up`;
+  - skips, with a reason counted in `skipped`:
+    - `non_left`;
+    - `no_release`;
+    - `drag` (the up point is more than `drag_fraction` × client diagonal
+      away);
+    - `no_frame` (no frame with `t <= down.t - lead_seconds`, or that frame is
+      older than `max_frame_age`);
+    - `unreadable_frame`;
+  - the pre-click frame is the last `frame` event with
+    `t <= down.t - lead_seconds`. Using the frame *before* the press avoids a
+    pressed-button look.
+- `select_sessions(root, window_title, names=()) -> list[Path]`:
+  - uses `recording.dataset.list_sessions`;
+  - keeps complete or incomplete sessions whose `window_title` contains
+    `window_title` (case-insensitive);
+  - if `names` is non-empty, keeps only those names;
+  - sorted by name.
+- `DemoBank`:
+  - built with `DemoBank.build(session_dirs, **extract_kwargs)`;
+  - holds `clicks` (a tuple), per-session counts, the skipped totals, and a
+    stacked `screens` matrix (N × D) for fast similarity;
+  - `DemoBank.from_clicks(clicks)` builds one without disk, for tests and for
+    eval folds.
+
+### `imitation/policy.py`
+
+- `PolicyConfig(k=5, screen_threshold=0.92, patch_threshold=0.8, cooldown_seconds=3.0, target_radius=0.03, deny_zones=())`, validated in `__post_init__`.
+- `Proposal` (frozen) has these fields:
+  - `fx`, `fy`;
+  - `screen_similarity`, `patch_similarity`;
+  - `votes` (the cluster size), `score`;
+  - `demo_session`, `demo_t`;
+  - `reason`, a one-line human-readable text.
+- `Abstention(reason)`.
+- `ImitationPolicy(bank, config).propose(frame_bgr, *, now, recent=()) -> Proposal | Abstention`:
+  - `recent` holds `(fx, fy, t)` of recent taps.
+  - Steps:
+    1. `screen_feature` of the live frame, then similarity to every demo.
+    2. Take the top `k` whose similarity ≥ `screen_threshold`. If there are
+       none, abstain: "unknown screen (best 0.xx)".
+    3. For each of them, compute `patch_similarity(patch_at(live, fx, fy), demo.patch)`
+       and keep those ≥ `patch_threshold`. If none remain, abstain: "screen
+       known but no demo target matches".
+    4. Drop candidates in a deny-zone, and candidates within `target_radius`
+       (fraction of the client diagonal, using the live frame's size) of a
+       `recent` tap younger than `cooldown_seconds`. If none remain, abstain
+       with that reason.
+    5. Greedily cluster the survivors by `target_radius`. Each candidate's
+       score is `screen_sim * patch_sim`, and a cluster's score is the sum of
+       its members'.
+    6. Pick the cluster with the best score. The proposal's point is that
+       cluster's best single member, so the point is always a real recorded
+       point.
+  - Deterministic: ties break by earlier demo (session name, then `t`).
+- `in_deny_zone(fx, fy, zones) -> bool`: the zone interval is inclusive.
+
+### `imitation/evaluate.py` + `scripts/imitation.py`
+
+- `evaluate(bank, config, *, mode="loso", gap_seconds=10.0) -> EvalReport`:
+  - For each demo click, reload its pre-click frame, build a fold bank and
+    call `propose` on that frame with `recent=()`.
+    - In `loso` mode the fold bank holds the clicks from other sessions.
+    - In `loco` mode it holds every other click, except those from the same
+      session within ±`gap_seconds`.
+  - Each click scores as:
+    - `hit`: the proposal is within `target_radius` of the true point;
+    - `miss`: a proposal elsewhere;
+    - `abstain`.
+  - The report gives the counts, `precision = hits / (hits + misses)`,
+    `coverage = (hits + misses) / total`, a per-session breakdown and the
+    abstain reasons.
+- `scripts/imitation.py`:
+  - `bank <recordings_root> --window TITLE [--sessions a,b]`: sessions, click
+    counts and skip reasons;
+  - `eval <recordings_root> --window TITLE [--profile DIR] [--mode loso|loco] [--out FILE] [--overwrite]`:
+    - the thresholds come from the profile's `imitation` block when
+      `--profile` is given, otherwise the defaults;
+    - `--out` is written atomically and never over a recording file.
+  - Read-only apart from `--out`.
+
+### Profile (`agent/profile.py`)
+
+- The `imitation` block is parsed into `ImitationConfig` (frozen), saved, and
+  round-tripped.
+- The loader does not touch recordings.
+
+### `main.py` wiring (Claude)
+
+- An "Imitation" panel:
+  - Load Demos, which builds the `DemoBank` on a background thread from
+    `recordings/` with the profile's block;
+  - status "N clicks from M sessions (skipped …)";
+  - Start / Stop;
+  - a "Live (send taps)" checkbox that is never saved and is off by default;
+  - the last proposal or abstention.
+- While running, at most once per `min_interval_seconds` and only when the
+  executor is idle, the policy runs on the latest frame (on a worker, not the
+  Tk thread).
+  - Dry run: log "Would tap (fx, fy) — screen 0.95, patch 0.88, votes 3,
+    demo <session> t=…".
+  - Live: the Tk thread re-checks the deny-zones, input on, not recording,
+    planner auto off and the same window. Then it submits
+    `ActionIntent(rule_name="imitation", action="tap", tap_point=(fx, fy), skill_name=None, …)`
+    with `source="imitation"`.
+- The stop conditions are listed in invariant item 4.
 
 ## Checklist
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | Done (PR #108) | Claude | Issue #107, `feature/v1.2-tap-demos`, this plan, tap invariant, HANDOFF/ROADMAP, draft release PR. |
-| 1 | `tap` skill: skills/profile/intent/dispatcher + `requires` | Done (PR #110) | Codex + Claude | Tests for parsing, round-trip, fail-closed `requires`, foreground, bounds and hit-test gates. |
-| 2 | Cursor restore in `InputController.click` | Done (PR #110) | Codex + Claude | SetCursorPos + read-back before the click; restore outside the input lock, even when the click raises. |
-| 3 | Demo labeling (`recording/labels.py`, `recordings.py label`) | Done (PR #112) | Codex | Pure duck-typed labels, guarded atomic JSONL output, CLI/docs and synthetic tests. |
-| 4 | `main.py` wiring + safety review | Done (PR #111) | Claude | describe_skill, capture allow-list (only key skills run without capture), auto foreground check, Save Profile drops/logs taps whose `requires` detector is gone. Safety review: no Critical/Important. |
-| 5 | Docs + example | Done (PR #113) | Claude | USER_GUIDE "Tap skills" (fields, refusals, cursor restore); example profile gets a disabled `tap_centre` (no templates committed). Label docs came with task 3. |
-| 6 | Windows smoke test | Done | Claude | Pixel Dungeon ML and Merchant Guilds (Google Play Games), harmless taps only. 11/11 checks — see "Smoke test results". |
-| R | Release v1.2.0 | Done | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS/version; PR #109 as a merge commit. |
+| 0 | Kickoff | In progress | Claude | Issue #115, `feature/v1.3-imitation`, this plan, imitation invariant, HANDOFF/ROADMAP, draft release PR. |
+| 1 | `imitation/features.py` + `imitation/demo_bank.py` | Todo | Codex | Synthetic recordings in tests (tiny frames written with cv2). |
+| 2 | `imitation/policy.py` | Todo | Codex | Abstain paths, deny-zones, cooldown, clustering, determinism. |
+| 3 | `imitation/evaluate.py` + `scripts/imitation.py` | Todo | Codex | loso/loco, guarded `--out`. |
+| 4 | Profile `imitation` block | Todo | Codex | Parse/save/round-trip, rejects. Boundary test: `imitation/` never imports the input path. |
+| 5 | `main.py` Imitation panel + live wiring + safety review | Todo | Claude | Dry-run default; live behind every gate. |
+| 6 | Real demos + offline eval + smoke on Merchant Guilds | Todo | Claude + user | The user records 10–20 min of demos; eval; dry run; harmless live taps only. |
+| R | Release v1.3.0 | Todo | Claude | Docs, version, merge commit. |
 
 ## Acceptance criteria
 
-1. A tap skill round-trips through Save/Load. A malformed `at` or `requires`
-   (out of range, a bool, the wrong length, an unknown name, `rises`) is
-   rejected with one clear error.
-2. A tap intent is built only when every `requires` condition holds on a
-   fresh observation. A missing, stale, low-confidence or invalid
-   observation builds no intent.
-3. The dispatcher sends a tap only with input on and the captured window in
-   the foreground, at the profile's point inside the live client area, under
-   the rate limit. F8 or cancel blocks it.
-4. The LLM can run a tap skill only by name. The prompt shows the skill, and
-   no directive carries coordinates.
-5. After any click (click skill, tap or UI rule), the cursor returns to its
-   previous position. On the real game, a clicked button is detected again
-   on the next vision tick without the user moving the mouse.
-6. `recordings.py label` maps a synthetic session's clicks and keys to the
-   right skills and counts unlabeled input. It writes nothing without
-   `--out`.
-7. Existing v1.1 profiles and all earlier invariants are unchanged.
+1. `scripts/imitation.py bank` lists the user's Merchant Guilds sessions with
+   click counts and skip reasons, and writes nothing.
+2. On synthetic sessions, the policy proposes the recorded point for a
+   matching screen and abstains on an unknown screen, a mismatching patch, a
+   deny-zone or a target in cooldown.
+3. `scripts/imitation.py eval` reports hits, misses, abstains, precision and
+   coverage in loso and loco modes.
+4. Dry run never sends input. Its log line names the demo the point came from.
+5. Live mode sends a tap only through `SkillExecutor` → `ActionDispatcher`,
+   with input on and the game in the foreground. F8, input off, profile load,
+   recording start or planner auto turns it off.
+6. A deny-zone point is never tapped, even if a demo click was inside it.
+7. Profiles without `imitation`, and every earlier invariant, are unchanged.
 8. Tests and ruff are clean; CI is green.
 
-## Smoke test results (2026-09-28)
+## Out of scope (maybe later)
 
-Run in-process through the real stack (`parse_profile` → `SkillBook` →
-`SkillExecutor` → `ActionDispatcher` → `InputController`) on the user's
-Windows 11 machine (4K, 150% scale), with games in Google Play Games. Only
-harmless taps on empty map/title areas; no fights, no purchases. Profiles and
-templates stayed local (gitignored).
-
-Pixel Dungeon ML (title screen):
-- PASS a tap whose `requires` needs `btn_wait` builds no intent on the title
-  screen (no Wait button there) — criterion 2;
-- PASS a tap with input control off is refused — criterion 3.
-
-Merchant Guilds (town map, tap at an empty forest spot, `at` [0.9, 0.8]):
-- PASS input off → "Input control is disabled.";
-- PASS another window in the foreground → "Target window is not the
-  foreground window; tap blocked.";
-- PASS a topmost window over the point, game in the foreground → "Tap point is
-  covered or off-screen; tap blocked.";
-- PASS the tap is dispatched ("Tapped (2364, 1666).") and the game screen is
-  unchanged;
-- PASS the cursor is back at its parked position after the tap;
-- PASS after F8 (input off) → refused;
-- PASS a click skill on a detected template is dispatched ("Clicked …");
-- PASS the cursor is restored after the click;
-- PASS the clicked template is detected again at confidence 1.00 on every
-  tick for 1.5 s without moving the mouse — criterion 5.
-
-All 8 acceptance criteria pass: 1, 2, 4, 6, 7 and 8 by the test suite and CI,
-3 and 5 also live above.
-
-## Out of scope
-
-- tap points chosen by the model, or relative to a detection (maybe later);
-- drags, right clicks, scrolls;
-- training any model on labels (v1.3);
-- acting on labels.
+- keys, drags, scrolls and right clicks in imitation;
+- captions of demo clicks by `qwen3.5:9b` (vision), and Set-of-Mark
+  prompting;
+- training any model;
+- self-review and profile patches (v1.4 / v1.5).

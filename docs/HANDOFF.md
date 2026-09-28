@@ -28,14 +28,23 @@ smoke test (11/11 checks on Pixel Dungeon ML and Merchant Guilds, see
 `docs/PLAN.md` "Smoke test results") and the release close-out in the release
 PR.
 
-**Next: v1.3 imitation, first target Merchant Guilds** (an idle crafting /
-trading game in Google Play Games). The user wants the AI to copy how they
-play from recorded demos ("chỉ cần học cách tôi chơi và copy lại"). Planned
-design, not started: retrieval over the user's demos (screen thumbnail +
-patch around each recorded click; replay a click only when the patch matches;
-unknown screens do nothing), offline leave-one-session-out scoring, a dry-run
-mode, and a live mode behind every existing gate plus deny-zones for purchase
-buttons. No training and no downloads; the local `qwen3.5:9b` has vision.
+**In progress: v1.3 "Imitation" (Issue #115)** on the integration branch
+`feature/v1.3-imitation`. The first target is Merchant Guilds, an idle
+crafting / trading game in Google Play Games. The user wants the AI to copy
+how they play from recorded demos ("chỉ cần học cách tôi chơi và copy lại").
+
+The spec, the imitation invariant, the task table and the acceptance criteria
+are in `docs/PLAN.md`. In short:
+- a new `imitation/` package does retrieval over the user's demo clicks: a
+  screen thumbnail plus a patch around each click;
+- a click is replayed only when both the screen and the patch match; unknown
+  screens do nothing;
+- deny-zones cover purchase buttons;
+- offline leave-one-session-out / leave-one-click-out scoring;
+- dry run by default; live mode behind every existing tap gate.
+
+No training and no downloads. The user records 10–20 min of Merchant Guilds
+demos with the app's Recording panel for task 6.
 
 Real-game notes: Google Play Games windows include the Play Games side bar
 and title bar in the client area; keep the app beside the game (capture reads
@@ -538,9 +547,9 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-Kick off v1.3 imitation (issue, `feature/v1.3-...` branch, `docs/PLAN.md`
-spec with an imitation invariant). The user records Merchant Guilds demos
-with the app's Record button.
+v1.3 tasks 1–4 (`imitation/` package, eval script, profile block) go to
+Codex; task 5 (main.py wiring) and task 6 (real demos + smoke) are Claude's.
+The user records Merchant Guilds demos with the app's Record button.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -576,7 +585,7 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-None right now.
+Issue #115 — v1.3 Imitation (open, tracked in `docs/PLAN.md`).
 
 Issue #107 (v1.2), #92 (v1.1), #82 (v1.0), #71 (v0.8), #61 (v0.7), #50 (v0.6), #41 (v0.5), #15 (v0.4), #13 (old v0.4 model-foundation tracker), #1 (v0.3) and #4 are closed.
 
