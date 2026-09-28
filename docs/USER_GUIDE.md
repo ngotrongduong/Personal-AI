@@ -463,6 +463,48 @@ Labeling is offline and read-only: it never captures a window, sends anything
 to the game, edits a profile or changes the recording. Output is refused
 inside `profiles/` and over the recording's own files.
 
+### Imitation (v1.3, in progress)
+
+Imitation retrieves moments that look like your own recorded play and proposes
+the exact left-click point you used. Record several representative sessions in
+the **Recording** panel while playing normally. Include repeated examples of
+safe buttons and screens; the policy abstains when either the whole screen or
+the patch around the recorded point does not match.
+
+Select those demos in the optional profile block:
+
+```json
+"imitation": {
+  "window_title": "Merchant Guilds",
+  "sessions": [],
+  "k": 5,
+  "screen_threshold": 0.92,
+  "patch_threshold": 0.8,
+  "cooldown_seconds": 3.0,
+  "min_interval_seconds": 1.5,
+  "deny_zones": [[0.0, 0.0, 0.25, 0.08]]
+}
+```
+
+An empty `sessions` list uses every recording whose window title contains
+`window_title`; otherwise list plain recording folder names. Put shop, gem,
+purchase and other unsafe controls in `deny_zones` as `[x, y, width, height]`
+fractions of the client area.
+
+Inspect and evaluate the demo bank offline before live wiring is enabled:
+
+```powershell
+python scripts/imitation.py bank recordings --window "Merchant Guilds"
+python scripts/imitation.py eval recordings --window "Merchant Guilds" --mode loso
+python scripts/imitation.py eval recordings --window "Merchant Guilds" `
+  --profile profiles\merchant_guilds --mode loco --out imitation-report.json
+```
+
+`bank` never writes. `eval` writes only when `--out` is present, refuses to
+overwrite without `--overwrite`, and never writes inside a recording session.
+Precision measures how often a proposed point is right; coverage measures how
+often the policy proposes instead of safely abstaining.
+
 ## 7. Troubleshooting
 
 | Preflight says | Do this |

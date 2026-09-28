@@ -1669,6 +1669,7 @@ class PersonalGameAIApp:
                 permissions=self.profile.permissions if self.profile is not None else None,
                 planner=planner,
                 expectations=self.profile.expectations if self.profile is not None else None,
+                imitation=self.profile.imitation if self.profile is not None else None,
                 overwrite=overwrite,
             )
         except (ProfileError, ValueError) as exc:
