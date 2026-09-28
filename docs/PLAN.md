@@ -108,7 +108,7 @@ imitation work in v1.3 its data.
 | 2 | Cursor restore in `InputController.click` | Done (PR #110) | Codex + Claude | SetCursorPos + read-back before the click; restore outside the input lock, even when the click raises. |
 | 3 | Demo labeling (`recording/labels.py`, `recordings.py label`) | To do | Codex (else Claude) | Synthetic sessions in tests. |
 | 4 | `main.py` wiring + safety review | Done | Claude | describe_skill, capture allow-list (only key skills run without capture), auto foreground check, Save Profile drops/logs taps whose `requires` detector is gone. Safety review: no Critical/Important. |
-| 5 | Docs + example | To do | Codex (else Claude) | USER_GUIDE, example profile tap skill (no templates committed). |
+| 5 | Docs + example | Done | Claude | USER_GUIDE "Tap skills" (fields, refusals, cursor restore); example profile gets a disabled `tap_centre` (no templates committed). Label docs came with task 3. |
 | 6 | Windows smoke test | To do | Claude | Pixel Dungeon ML: harmless taps only (no fights, permadeath); cursor restore fixes the LOST button. |
 | R | Release v1.2.0 | To do | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS/version, merge commit. |
 
