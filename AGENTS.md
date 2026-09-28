@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- No active integration branch right now. The last one, `feature/v1.2-tap-demos` (Issue #107), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
+- Active integration branch: `feature/v1.3-imitation` (Issue #115). Sub-task PRs target it; it merges into `main` as a merge commit when v1.3 is done.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,10 +94,14 @@ feature/<milestone>
 
 ## Current priority
 
+v1.3 "Imitation" (Issue #115) is in progress on `feature/v1.3-imitation`.
+It copies the user's own recorded clicks by retrieval (no training, no
+downloads). The first target is Merchant Guilds. See `docs/PLAN.md`.
+
 v1.2 "Taps + demo labels" (Issue #107) is released on `main`. It adds a
 `tap` skill type (a fixed point from the profile), restores the cursor after
 clicks, and labels recorded demos with profile skills. Next is v1.3
-imitation (see `docs/ROADMAP.md`).
+imitation (see above).
 
 v1.1 "Meters" (Issue #92) is released on `main`. It wires the existing
 resource-bar measurement into profiles, GameState, rules, expectations, stop
@@ -194,3 +198,11 @@ Tap invariant (permanent from v1.2):
 - Taps use the same path and gates as every skill: SkillExecutor -> ActionDispatcher -> InputController, input on/F8, freshness, rate limit, cancel, disabled by default.
 - Restoring the cursor after a click is a cursor move only, never a button or key event.
 - Demo labeling only reads recordings and profiles; it never sends input or edits a profile, and nothing acts on labels.
+
+Imitation invariant (permanent from v1.3):
+- An imitation point is exactly the normalised point of one of the user's own recorded left clicks, from the recordings the profile's `imitation` block selects. The LLM, detectors and rules never supply it.
+- A point is proposed only when both the live screen (`screen_threshold`) and the image around the point (`patch_threshold`) match that demo click; otherwise the policy abstains. An unknown screen never produces input.
+- Profile deny-zones are never tapped. They are checked in the policy and again right before a live step is submitted.
+- Dry run is the default. Live mode is an unsaved checkbox that needs input control on. It turns off on F8/input off, profile load, recording start, planner auto, a window change, or 3 failed steps in a row.
+- A live step is an `ActionIntent(action="tap")` through SkillExecutor -> ActionDispatcher -> InputController, with every tap gate (foreground, hit-test, freshness, rate limit, cancel, F8), plus imitation's own minimum interval and per-target cooldown.
+- `imitation/` modules never import the input path, never write or delete recordings, and write only an eval report when `--out` is given.

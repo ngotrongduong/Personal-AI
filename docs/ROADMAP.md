@@ -147,7 +147,7 @@ Each step keeps every earlier invariant. The AI never grants itself keys,
 points or permissions; F8 always stops everything.
 
 - **v1.2 — Taps + demo labels (Issue #107, released).**
-- **v1.3 — Imitation (first target: Merchant Guilds).**
+- **v1.3 — Imitation (first target: Merchant Guilds; Issue #115, in progress).**
   - Copy the user's own play: for each recorded click, keep what the screen
     looked like; at run time, find the most similar demo screen, check the
     area around the recorded click still matches, and repeat that click.
