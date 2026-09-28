@@ -61,6 +61,38 @@ def test_cli_bank_eval_and_atomic_output(tmp_path) -> None:
     assert not out.with_name(out.name + ".tmp").exists()
 
 
+def test_cli_eval_needs_window_or_profile(tmp_path) -> None:
+    _bank(tmp_path)
+    code, _, stderr = _run("eval", str(tmp_path))
+    assert code == 2
+    assert "--window or --profile" in stderr
+
+    profile = tmp_path.parent / "profile"
+    profile.mkdir()
+    (profile / "profile.json").write_text(
+        json.dumps(
+            {
+                "format_version": 1,
+                "name": "demo",
+                "permissions": {},
+                "detectors": [],
+                "skills": [],
+                "rules": [],
+                "planner": {"enabled": False},
+                "imitation": {
+                    "window_title": "Merchant",
+                    "screen_threshold": 0.8,
+                    "patch_threshold": 0.7,
+                },
+            }
+        ),
+        encoding="utf-8",
+    )
+    code, stdout, stderr = _run("eval", str(tmp_path), "--profile", str(profile))
+    assert (code, stderr) == (0, "")
+    assert "2 clicks from 2 session" in stdout
+
+
 def test_cli_output_guards(tmp_path) -> None:
     _, session = _bank(tmp_path)
     protected = session / "report.json"

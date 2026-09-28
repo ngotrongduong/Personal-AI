@@ -9,7 +9,7 @@ from pathlib import Path
 
 import numpy as np
 
-from imitation.features import patch_at, read_frame, screen_feature
+from imitation.features import PATCH_FRACTION, patch_at, read_frame, screen_feature
 from recording.dataset import list_sessions, load_session
 from recording.schema import FrameEvent, MouseButtonEvent
 
@@ -38,7 +38,7 @@ def extract_demo_clicks(
     lead_seconds: float = 0.05,
     max_frame_age: float = 0.5,
     drag_fraction: float = 0.02,
-    patch_fraction: float = 0.08,
+    patch_fraction: float = PATCH_FRACTION,
 ) -> ExtractResult:
     """Extract click features from one validated recording session."""
 

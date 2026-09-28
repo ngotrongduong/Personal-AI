@@ -185,7 +185,7 @@ class ImitationConfig:
 
     window_title: str
     sessions: tuple[str, ...] = ()
-    k: int = 5
+    k: int = 20
     screen_threshold: float = 0.92
     patch_threshold: float = 0.8
     cooldown_seconds: float = 3.0
@@ -490,7 +490,7 @@ def _parse_imitation(value: object) -> ImitationConfig:
             )
         sessions.append(session)
 
-    k = block.get("k", 5)
+    k = block.get("k", 20)
     if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= 20:
         raise ProfileError("imitation.k must be an integer from 1 to 20.")
 
