@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass, field, replace
 import logging
 import math
 import queue
@@ -79,7 +79,16 @@ from agent.skill_effects import (
     MeterExpectation,
 )
 from agent.skill_executor import SkillExecutor
-from agent.skills import ClickSkill, HoldSkill, PressSkill, Skill, SkillBook, SkillPermissions
+from agent.skill_requirements import DetectorRequirement
+from agent.skills import (
+    ClickSkill,
+    HoldSkill,
+    PressSkill,
+    Skill,
+    SkillBook,
+    SkillPermissions,
+    TapSkill,
+)
 from agent.step_history import Decision, StepHistory, StepRecord
 from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
@@ -99,7 +108,7 @@ from vision.detector_registry import DetectorRegistry, DetectorSpec
 from vision.template_matcher import TemplateMatcher, MatchResult
 
 
-APP_VERSION = "1.1.1"
+APP_VERSION = "1.2.0"
 PLANNER_DEFAULT_MODEL = "qwen3.5:9b"
 PLANNER_NO_CYCLE_TEXT = "Last cycle: —"
 PLANNER_MESSAGE_MAX_CHARS = 100
@@ -143,6 +152,8 @@ def describe_skill(skill: Skill | None) -> str:
         return f"press {skill.key}"
     if isinstance(skill, HoldSkill):
         return f"hold {skill.key} {skill.seconds:g}s"
+    if isinstance(skill, TapSkill):
+        return f"tap {skill.describe_point()}"
     return "unknown"
 
 
@@ -154,6 +165,7 @@ class ProfileContents:
     skills: list[Skill]
     rules: list[RuleDefinition]
     skipped_rules: list[str]
+    skipped_skills: list[str] = field(default_factory=list)
 
 
 def collect_profile_contents(
@@ -165,7 +177,8 @@ def collect_profile_contents(
 
     - Every detector with a kept template image is saved.
     - The loaded profile's skills are kept as written in its file (runtime
-      toggles are not saved); click skills whose detector is gone are dropped.
+      toggles are not saved); click skills whose detector is gone, and tap
+      skills whose `requires` names a detector that is gone, are dropped.
     - A UI click rule becomes a rule that fires a click skill on the same
       detector. New click skills are saved **disabled**, so a saved rule never
       clicks after loading until the user enables its skill.
@@ -177,11 +190,13 @@ def collect_profile_contents(
         for name, (spec, template) in detector_templates.items()
     ]
     detector_names = set(detector_templates)
-    skills: list[Skill] = [
-        skill
-        for skill in (profile.skills if profile is not None else ())
-        if not isinstance(skill, ClickSkill) or skill.detector in detector_names
-    ]
+    skills: list[Skill] = []
+    skipped_skills: list[str] = []
+    for skill in profile.skills if profile is not None else ():
+        if _skill_detectors_kept(skill, detector_names):
+            skills.append(skill)
+        else:
+            skipped_skills.append(skill.name)
     skill_names = {skill.name for skill in skills}
 
     rules: list[RuleDefinition] = []
@@ -215,7 +230,21 @@ def collect_profile_contents(
                 enabled,
             )
         )
-    return ProfileContents(detectors, skills, rules, skipped)
+    return ProfileContents(detectors, skills, rules, skipped, skipped_skills)
+
+
+def _skill_detectors_kept(skill: Skill, detector_names: set[str]) -> bool:
+    """False if saving `skill` would name a detector that is not saved."""
+
+    if isinstance(skill, ClickSkill):
+        return skill.detector in detector_names
+    if isinstance(skill, TapSkill):
+        return all(
+            requirement.detector in detector_names
+            for requirement in skill.requires
+            if isinstance(requirement, DetectorRequirement)
+        )
+    return True
 
 
 def _click_skill_for(rule: VisibilityRule, skills: list[Skill], skill_names: set[str]) -> str:
@@ -246,6 +275,18 @@ def _click_skill_for(rule: VisibilityRule, skills: list[Skill], skill_names: set
     )
     skill_names.add(name)
     return name
+
+
+def _capture_refusal(skill: Skill | None, capture: object | None) -> str | None:
+    """Only key skills may run without capture; anything that aims is refused."""
+
+    if capture is not None or skill is None or isinstance(skill, PressSkill | HoldSkill):
+        return None
+    if isinstance(skill, ClickSkill):
+        return "Start Capture first; click skills aim at captured detections."
+    if isinstance(skill, TapSkill):
+        return "Start Capture first; tap skills aim at the captured window."
+    return "Start Capture first; this skill aims at the captured window."
 
 
 BASE_WINDOW_SIZE = (1500, 900)
@@ -1642,6 +1683,11 @@ class PersonalGameAIApp:
             f"{len(contents.skills)} skills, {len(contents.rules)} rules. "
             "New click skills are saved disabled; edit profile.json to add key skills."
         )
+        if contents.skipped_skills:
+            self.log(
+                "Skills not saved (a detector they need is missing): "
+                + ", ".join(contents.skipped_skills)
+            )
         if contents.skipped_rules:
             self.log(
                 "Rules not saved (their detector or skill is missing): "
@@ -1727,9 +1773,10 @@ class PersonalGameAIApp:
         if self.executor.busy:
             self._skill_blocked(name, "manual", "Busy: another skill is running.")
             return
-        if isinstance(book.get(name), ClickSkill) and self.capture is None:
-            # A click target comes from the captured frames of one window.
-            self._skill_blocked(name, "manual", "Start Capture first; click skills aim at captured detections.")
+        refusal = _capture_refusal(book.get(name), self.capture)
+        if refusal is not None:
+            # A click or tap target comes from the captured window.
+            self._skill_blocked(name, "manual", refusal)
             return
         built = book.build_intent(name, self.game_state, source="manual")
         if built.intent is None:
@@ -2332,10 +2379,10 @@ class PersonalGameAIApp:
                     if hwnd != self._auto_hwnd:
                         window_changed = True
                         refusal = "The game window changed after auto mode was confirmed."
-                    elif isinstance(self.skill_book.get(name), ClickSkill) and not (
+                    elif not isinstance(self.skill_book.get(name), PressSkill | HoldSkill) and not (
                         is_foreground(hwnd)
                     ):
-                        refusal = "Auto click skills need the game window in the foreground."
+                        refusal = "Auto click and tap skills need the game window in the foreground."
                 elif not focus_window(hwnd, settle_seconds=0.15):
                     self.log("Windows did not confirm the game window is in the foreground.")
             except Exception as exc:
@@ -2373,8 +2420,9 @@ class PersonalGameAIApp:
             return "Input control is disabled."
         if self.executor.busy:
             return "Busy: another skill is running."
-        if isinstance(book.get(name), ClickSkill) and self.capture is None:
-            return "Start Capture first; click skills aim at captured detections."
+        refusal = _capture_refusal(book.get(name), self.capture)
+        if refusal is not None:
+            return refusal
         built = book.build_intent(name, self.game_state, source=PLANNER_SOURCE)
         if built.intent is None:
             return f"{built.reason}."

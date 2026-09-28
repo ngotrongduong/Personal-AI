@@ -1,4 +1,4 @@
-# Personal Game AI — User Guide (v1.1)
+# Personal Game AI — User Guide (v1.2)
 
 This guide takes you from a fresh checkout to a first supervised agent run.
 The target is Notepad, so nothing can go wrong in a game. It then shows how
@@ -115,7 +115,8 @@ template image with a name.
 4. Close the app or turn input control off, then edit `profile.json` by
    hand:
    - Add `permissions.allowed_keys` and key skills (`press` / `hold`). A
-     `click` skill clicks a detector's box.
+     `click` skill clicks a detector's box; a `tap` skill clicks a fixed
+     point (see *Tap skills* below).
    - Add an **`expect`** block to a skill: what the skill should change on
      screen. After each step the app watches for it and records the effect
      as `confirmed` or `not_seen`.
@@ -360,6 +361,53 @@ for a change condition. A meter rule only names a profile skill; the existing
 skill permissions, foreground checks, dispatcher gates and F8 emergency stop
 still control whether that skill can produce input.
 
+### Tap skills: click a fixed spot
+
+v1.2 adds a **`tap`** skill for buttons that do not move or that you cannot
+use as a template, such as the centre of the map, an inventory slot or a "wait"
+button. A tap clicks a fixed point of the game window. The point comes only
+from `profile.json`: the planner picks a skill *name*, never a point.
+
+```json
+{
+  "name": "wait_turn",
+  "type": "tap",
+  "at": [0.92, 0.88],
+  "requires": [
+    {"detector": "enemy", "visible": false},
+    {"meter": "hp", "above": 0.5}
+  ],
+  "max_observation_age_seconds": 0.75,
+  "enabled": false
+}
+```
+
+The fields:
+- `at`: `[x, y]` as fractions of the window's client area (`[0, 0]` is the
+  top-left corner, `[1, 1]` the bottom-right), so the point follows the window
+  when it moves or resizes. To find it, save a snapshot and divide the
+  pixel position by the image width and height.
+- `requires` (optional, up to 4): conditions that must **all** hold right before
+  the tap:
+  - `{"detector": "...", "visible": true}`: the detector is seen with at least
+    `min_confidence` (default 0.8);
+  - `{"detector": "...", "visible": false}`: the detector is freshly seen as
+    *not* visible; a weak detection does not count as gone;
+  - `{"meter": "...", "below": 0.3}` or `"above"`.
+- `max_observation_age_seconds`: how fresh each observation must be (default
+  0.75, at most 60).
+
+A tap is refused, and nothing is clicked, when:
+- input control is off, or Capture is not running;
+- the game window is not the foreground window;
+- a `requires` condition does not hold or its observation is missing or old;
+- the point is off the screen or covered by another window (the app checks
+  which window is under the point just before the click);
+- the cursor does not land exactly on the point.
+
+After every click or tap, the app moves the cursor back to where it was. This
+is a cursor move only, never a click or a key.
+
 ## 5. Auto mode
 
 Auto mode runs proposals without the Approve click. It needs:
@@ -393,6 +441,27 @@ The **Memory** box holds short notes that the planner sees as hints, e.g.
 "the chest needs a moment to open". Notes never change skills, keys or
 permissions. Tick **Let the planner write notes** if the model may add its
 own.
+
+### Label your demos
+
+After recording yourself playing, compare the recorded clicks and key presses
+with a profile's skills:
+
+```powershell
+python scripts/recordings.py label <session|path> <profile>
+python scripts/recordings.py label <session|path> <profile> --out labels.jsonl
+```
+
+`<profile>` can be a folder name under `profiles/` or a path to a profile
+folder. The command prints per-skill counts. With `--out`, it also writes one
+JSON object per input; an existing file needs `--overwrite`. Clicks inside a
+fresh detector box match click skills, nearby fixed points match tap skills,
+and key durations distinguish press from hold skills. Use `--radius` to change
+the tap matching radius (the default is 0.03 of the client diagonal).
+
+Labeling is offline and read-only: it never captures a window, sends anything
+to the game, edits a profile or changes the recording. Output is refused
+inside `profiles/` and over the recording's own files.
 
 ## 7. Troubleshooting
 

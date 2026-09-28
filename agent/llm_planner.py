@@ -32,7 +32,7 @@ from .llm_planner_schema import (
 )
 from .ollama_client import OllamaClient
 from .rule_engine import RuleEngine
-from .skills import ClickSkill, HoldSkill, PressSkill, SkillBook
+from .skills import ClickSkill, HoldSkill, PressSkill, SkillBook, TapSkill
 from .step_history import StepHistory
 
 
@@ -106,7 +106,18 @@ class SkillBookCatalog:
                 summaries.append(
                     SkillSummary(name, skill.TYPE, f"holds key {skill.key} for {skill.seconds:g}s")
                 )
+            elif isinstance(skill, TapSkill):
+                summaries.append(SkillSummary(name, skill.TYPE, describe_tap(skill)))
         return summaries
+
+
+def describe_tap(skill: TapSkill) -> str:
+    """e.g. "taps a fixed point (58%, 47%) when btn_wait visible, hp above 30%"."""
+
+    text = f"taps a fixed point {skill.describe_point()}"
+    if skill.requires:
+        text += " when " + ", ".join(requirement.describe() for requirement in skill.requires)
+    return text
 
 
 class LlmPlanner:

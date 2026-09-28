@@ -36,6 +36,9 @@ class ActionIntent:
     skill_name: str | None = None
     key: str | None = None
     hold_seconds: float | None = None
+    # v1.2 tap point: fractions (0..1) of the target's client area, only ever
+    # from a loaded profile's tap skill.
+    tap_point: tuple[float, float] | None = None
 
 
 @dataclass(frozen=True, slots=True)

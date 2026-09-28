@@ -191,10 +191,19 @@ SkillExecutor (one worker thread, one skill at a time)
 ActionDispatcher (allowlist re-check, foreground check, rate limit) → InputController
 ```
 
-- `agent/skills.py` defines `ClickSkill` / `PressSkill` / `HoldSkill`,
-  `SkillPermissions` and `SkillBook`. `FORBIDDEN_KEYS` (`f8`, the Windows keys,
-  `apps`) and `HARD_MAX_HOLD_SECONDS = 5.0` hold for every profile. A click
-  skill needs a visible, fresh, confident detector. Skills start disabled.
+- `agent/skills.py` defines `ClickSkill` / `PressSkill` / `HoldSkill` /
+  `TapSkill` (v1.2), `SkillPermissions` and `SkillBook`. `FORBIDDEN_KEYS` (`f8`,
+  the Windows keys, `apps`) and `HARD_MAX_HOLD_SECONDS = 5.0` hold for every
+  profile. A click skill needs a visible, fresh, confident detector. Skills
+  start disabled.
+- A tap skill taps a fixed profile point (`at`, fractions of the client area)
+  only when all its `requires` conditions (`agent/skill_requirements.py`:
+  detector visible/gone, meter above/below) hold on fresh observations.
+  The dispatcher maps the point into the live client area, requires the
+  foreground window and hit-tests the point (`window_owns_point`), and
+  `InputController.click` places the cursor with `SetCursorPos`, verifies
+  it, clicks, then moves the cursor back. Click and tap skills need a
+  running capture.
 - `agent/profile.py` has `load_profile`, `save_profile`, `list_profiles` and
   `profile_slug`.
   - Loading rejects unknown fields, duplicates, broken references and template
@@ -392,6 +401,31 @@ Meter invariant: meters only read. The profile, never the model, defines
 meters, thresholds and rule targets, and a meter rule still runs through
 SkillExecutor → ActionDispatcher → InputController. The boundary tests check
 that the meter modules never import the input path.
+
+## v1.2 taps and demo labels
+
+```text
+profile tap skill {"at": [fx, fy], "requires": [...]}
+  └─ SkillBook.build_intent ── requires on a fresh observation? ──► no intent
+       └─ ActionIntent(action="tap", tap_point=(fx, fy))
+            └─ SkillExecutor ──► ActionDispatcher._dispatch_tap
+                 input on · fresh · client area · foreground · window_owns_point
+                 · rate limit · cancel ──► InputController.click
+                      SetCursorPos + read-back ──► click ──► restore cursor
+recording + profile ──► recording/labels.py ──► per-skill counts / JSONL (--out)
+```
+
+- `agent/skill_requirements.py` parses and evaluates `requires` (detector
+  visibility or meter thresholds) and fails closed; it never imports the
+  input path.
+- `core/window_utils.window_owns_point` refuses a point covered by another
+  window or off every monitor.
+- `InputController.click` refuses to press when the cursor did not reach the
+  point, and always moves it back afterwards (a move only, no button).
+- `recording/labels.py` only reads a recording and a profile.
+
+Tap invariant: the profile is the only source of a tap point; the model picks
+only a skill name. See `AGENTS.md`.
 
 ## Why the LLM is not in the fast loop
 

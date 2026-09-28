@@ -30,6 +30,7 @@ from .planner_config import PlannerConfig, load_planner_config
 from .meter_conditions import MeterConditionError, parse_meter_condition
 from .rule_engine import SKILL_RULE_ACTION, MeterRule, Rule, RuleEngine, VisibilityRule
 from .skill_effects import ExpectationError, ExpectationLike, parse_expectation
+from .skill_requirements import RequirementError, parse_requirements
 from .skills import (
     ClickSkill,
     HoldSkill,
@@ -38,6 +39,7 @@ from .skills import (
     SkillBook,
     SkillError,
     SkillPermissions,
+    TapSkill,
 )
 
 
@@ -73,6 +75,15 @@ _SKILL_FIELDS = {
     },
     PressSkill.TYPE: {"name", "type", "key", "enabled", "expect"},
     HoldSkill.TYPE: {"name", "type", "key", "seconds", "enabled", "expect"},
+    TapSkill.TYPE: {
+        "name",
+        "type",
+        "at",
+        "requires",
+        "max_observation_age_seconds",
+        "enabled",
+        "expect",
+    },
 }
 _COMMON_RULE_FIELDS = {
     "name",
@@ -480,6 +491,16 @@ def _parse_skills(
                 raise ProfileError(
                     f"Skill {name!r} references unknown detector {detector!r}."
                 )
+        if skill_type == TapSkill.TYPE:
+            if "at" not in block:
+                raise ProfileError(f"Skill {name!r}: a tap skill needs 'at': [x, y].")
+            if "requires" in block:
+                try:
+                    options["requires"] = parse_requirements(
+                        block["requires"], detector_names, meter_names or set()
+                    )
+                except RequirementError as error:
+                    raise ProfileError(f"Skill {name!r}: {error}") from error
         try:
             skills.append(_SKILL_CLASSES[skill_type](**options))
         except TypeError as error:
@@ -493,6 +514,7 @@ _SKILL_CLASSES: dict[str, type] = {
     ClickSkill.TYPE: ClickSkill,
     PressSkill.TYPE: PressSkill,
     HoldSkill.TYPE: HoldSkill,
+    TapSkill.TYPE: TapSkill,
 }
 
 
@@ -826,6 +848,15 @@ def _skill_block(
             "type": skill.TYPE,
             "key": skill.key,
             "seconds": skill.seconds,
+            "enabled": skill.enabled,
+        }
+    elif isinstance(skill, TapSkill):
+        block = {
+            "name": skill.name,
+            "type": skill.TYPE,
+            "at": list(skill.at),
+            "requires": [requirement.to_block() for requirement in skill.requires],
+            "max_observation_age_seconds": skill.max_observation_age_seconds,
             "enabled": skill.enabled,
         }
     else:
