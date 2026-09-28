@@ -58,7 +58,7 @@ left click/tap.
 "imitation": {
   "window_title": "Merchant Guilds",
   "sessions": [],
-  "k": 5,
+  "k": 20,
   "screen_threshold": 0.92,
   "patch_threshold": 0.8,
   "cooldown_seconds": 3.0,
@@ -93,7 +93,8 @@ left click/tap.
   - an all-flat frame gives the zero vector.
 - `screen_similarity(a, b) -> float`: the dot product, clamped to [-1, 1]. A
   zero vector gives 0.0.
-- `patch_at(frame_bgr, fx, fy, fraction=0.08, side=24) -> np.ndarray`:
+- `patch_at(frame_bgr, fx, fy, fraction=0.16, side=30) -> np.ndarray`
+  (`PATCH_FRACTION`, `PATCH_SIDE`; 0.08/24 until #120):
   - a square crop centred on the point, with side
     `max(8, round(fraction * min(h, w)))`;
   - pixels outside the frame are filled by edge replication, so every point in
@@ -103,6 +104,11 @@ left click/tap.
   - If both patches are flat (std < 2), the result is 1.0 when the mean
     difference is ≤ 8, else 0.0.
   - If only one is flat, the result is 0.0.
+- `cell_patch_similarity(a, b, cells=3, keep=6) -> float` (#120): splits both
+  patches into a 3×3 grid, scores each cell with `patch_similarity`, and
+  averages the 6 best. Recorded frames show the mouse cursor (with trails) on
+  the click point, which sank whole-patch NCC to a median ~0.75 at the *same*
+  target; dropping the worst cells tolerates such small occluders.
 - Frames are read with `cv2.imdecode(np.fromfile(path, np.uint8), IMREAD_COLOR)`
   so non-ASCII paths work. An unreadable image gives `None`, never an
   exception.
@@ -114,7 +120,7 @@ left click/tap.
   - `fx`, `fy`: normalised by `session.json` `client_width/height`, clamped to
     [0, 1];
   - `screen` (`np.ndarray`, float32) and `patch` (`np.ndarray`, uint8).
-- `extract_demo_clicks(session_dir, *, lead_seconds=0.05, max_frame_age=0.5, drag_fraction=0.02, patch_fraction=0.08) -> ExtractResult(clicks, skipped)`:
+- `extract_demo_clicks(session_dir, *, lead_seconds=0.05, max_frame_age=0.5, drag_fraction=0.02, patch_fraction=PATCH_FRACTION) -> ExtractResult(clicks, skipped)`:
   - loads with `recording.dataset.load_session`;
   - a session whose report has errors is skipped whole (`skipped["invalid_session"]`);
   - considers every mouse_button `down` with `button == "left"`, and pairs it
@@ -145,7 +151,7 @@ left click/tap.
 
 ### `imitation/policy.py`
 
-- `PolicyConfig(k=5, screen_threshold=0.92, patch_threshold=0.8, cooldown_seconds=3.0, target_radius=0.03, deny_zones=())`, validated in `__post_init__`.
+- `PolicyConfig(k=20, screen_threshold=0.92, patch_threshold=0.8, cooldown_seconds=3.0, target_radius=0.03, deny_zones=())`, validated in `__post_init__`.
 - `Proposal` (frozen) has these fields:
   - `fx`, `fy`;
   - `screen_similarity`, `patch_similarity`;
@@ -159,7 +165,7 @@ left click/tap.
     1. `screen_feature` of the live frame, then similarity to every demo.
     2. Take the top `k` whose similarity ≥ `screen_threshold`. If there are
        none, abstain: "unknown screen (best 0.xx)".
-    3. For each of them, compute `patch_similarity(patch_at(live, fx, fy), demo.patch)`
+    3. For each of them, compute `cell_patch_similarity(patch_at(live, fx, fy), demo.patch)`
        and keep those ≥ `patch_threshold`. If none remain, abstain: "screen
        known but no demo target matches".
     4. Drop candidates in a deny-zone, and candidates within `target_radius`
@@ -193,9 +199,9 @@ left click/tap.
 - `scripts/imitation.py`:
   - `bank <recordings_root> --window TITLE [--sessions a,b]`: sessions, click
     counts and skip reasons;
-  - `eval <recordings_root> --window TITLE [--profile DIR] [--mode loso|loco] [--out FILE] [--overwrite]`:
-    - the thresholds come from the profile's `imitation` block when
-      `--profile` is given, otherwise the defaults;
+  - `eval <recordings_root> (--window TITLE | --profile DIR) [--mode loso|loco] [--out FILE] [--overwrite]`:
+    - the window, sessions and thresholds come from the profile's `imitation`
+      block when `--profile` is given, otherwise `--window` and the defaults;
     - `--out` is written atomically and never over a recording file.
   - Read-only apart from `--out`.
 
@@ -234,9 +240,43 @@ left click/tap.
 | 2 | `imitation/policy.py` | Done (#118) | Codex | Exact recorded points; abstention, deny-zone, cooldown, clustering and tie tests. |
 | 3 | `imitation/evaluate.py` + `scripts/imitation.py` | Done (#118) | Codex | LOSO/LOCO, readable summaries and atomic guarded `--out`; CLI smoke tests. |
 | 4 | Profile `imitation` block | Done (#118) | Codex | Strict parse/save/round-trip, Save preservation and input-boundary coverage. |
-| 5 | `main.py` Imitation panel + live wiring + safety review | Done (PR pending) | Claude | `imitation/runner.py` worker threads; dry run by default; live only after confirmation, via `SkillExecutor` gates; tap `created_at` is the frame time. safety-reviewer blocker (live var set before the dialog answered) fixed with a separate confirmed flag. |
-| 6 | Real demos + offline eval + smoke on Merchant Guilds | Todo | Claude + user | The user records 10–20 min of demos; eval; dry run; harmless live taps only. |
+| 5 | `main.py` Imitation panel + live wiring + safety review | Done (#119) | Claude | `imitation/runner.py` worker threads; dry run by default; live only after confirmation, via `SkillExecutor` gates; tap `created_at` is the frame time. safety-reviewer blocker (live var set before the dialog answered) fixed with a separate confirmed flag. |
+| 6 | Real demos + offline eval + smoke on Merchant Guilds | In progress (#120) | Claude + user | Demos and eval done (see "Task 6 results"); in-app dry run and harmless live taps next. |
 | R | Release v1.3.0 | Todo | Claude | Docs, version, merge commit. |
+
+## Task 6 results (2026-09-28)
+
+**Demos.** Four Merchant Guilds sessions were recorded.
+- Two sessions are usable: about 10 minutes, 675 left clicks. After the
+  deny-zones (side menu, top bar, offer corner), 634 remain.
+- The first two sessions are excluded. The game ignored every click in them:
+  no click changed the next frames.
+
+**"Invisible curtain".** During those two sessions the user could not interact
+with the game window until they minimised and restored it. We checked:
+- The pynput hooks add ~0 ms latency, and the same hooks were active in the
+  good sessions.
+- No window covers the game.
+
+So this looks like a Google Play Games input glitch, not the recorder. The
+workaround is to minimise and restore the game. Note also that `PrintWindow`
+on the game window may trigger it, so our diagnostics avoid it; capture uses
+Desktop Duplication only.
+
+**Offline eval** (`scripts/imitation.py eval recordings --profile profiles/merchant_guilds`, gap 10 s):
+
+| Patch matching | loco precision | loco coverage | loso precision | loso coverage |
+|---|---|---|---|---|
+| Whole-patch NCC, 8%/24 px, k=5 (#118) | 16.9% | – | – | – |
+| 3×3 cells, best 6, 16%/30 px, k=20 (#120) | 36.9% | 80.3% | 33.3% | 25.8% |
+
+- Counting any click the user made within the next 3 s as correct raises loco
+  precision to ~54% (offline experiment). Most of the remaining misses are
+  screens where the user makes several valid, different clicks.
+- Loso coverage is low because the second session is short: 41 clicks, mostly
+  screens the first session never showed.
+- Larger patches, finer grids and other `keep` values were not significantly
+  better.
 
 ## Acceptance criteria
 

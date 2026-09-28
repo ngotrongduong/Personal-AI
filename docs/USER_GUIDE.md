@@ -471,13 +471,17 @@ the **Recording** panel while playing normally. Include repeated examples of
 safe buttons and screens; the policy abstains when either the whole screen or
 the patch around the recorded point does not match.
 
+If a Google Play Games window stops reacting to your clicks while you record,
+minimise it and restore it before you go on. A session in which the game
+ignored your clicks teaches the policy nothing; leave it out of `sessions`.
+
 Select those demos in the optional profile block:
 
 ```json
 "imitation": {
   "window_title": "Merchant Guilds",
   "sessions": [],
-  "k": 5,
+  "k": 20,
   "screen_threshold": 0.92,
   "patch_threshold": 0.8,
   "cooldown_seconds": 3.0,
@@ -496,9 +500,14 @@ Inspect and evaluate the demo bank offline before live wiring is enabled:
 ```powershell
 python scripts/imitation.py bank recordings --window "Merchant Guilds"
 python scripts/imitation.py eval recordings --window "Merchant Guilds" --mode loso
-python scripts/imitation.py eval recordings --window "Merchant Guilds" `
-  --profile profiles\merchant_guilds --mode loco --out imitation-report.json
+python scripts/imitation.py eval recordings --profile profiles\merchant_guilds `
+  --mode loco --out imitation-report.json
 ```
+
+With `--profile`, the window, sessions and thresholds come from its
+`imitation` block. The patch around each point is compared as a 3×3 grid,
+ignoring the three worst cells, so the mouse cursor drawn into recorded frames
+does not spoil a match.
 
 `bank` never writes. `eval` writes only when `--out` is present, refuses to
 overwrite without `--overwrite`, and never writes inside a recording session.
