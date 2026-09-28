@@ -21,6 +21,7 @@ from typing import ClassVar, TypeAlias
 from .game_state import GameState
 from .meter_conditions import METER_SOURCE
 from .rule_engine import ActionIntent
+from .skill_requirements import Requirement, unmet_requirement
 
 
 # Reserved in code whatever a profile says: F8 is the emergency stop, and the
@@ -33,6 +34,7 @@ DEFAULT_MAX_HOLD_SECONDS = 1.0
 DEFAULT_MAX_ACTIONS_PER_SECOND = 5.0
 DEFAULT_CLICK_MIN_CONFIDENCE = 0.82
 DEFAULT_CLICK_MAX_OBSERVATION_AGE_SECONDS = 0.75
+DEFAULT_TAP_MAX_OBSERVATION_AGE_SECONDS = 0.75
 
 # One lowercase key name (pydirectinput spelling, e.g. "x", "space", "f1") or a
 # single punctuation key. No "+", spaces or uppercase, so no combos.
@@ -187,12 +189,65 @@ class HoldSkill:
         _require_bool(self.enabled, self.name)
 
 
+@dataclass(frozen=True, slots=True)
+class TapSkill:
+    """Click a fixed point of the game window's client area (v1.2).
+
+    `at` is (x, y) as fractions of the client area, so the point follows the
+    window when it moves or resizes. Every condition in `requires` must hold on
+    a fresh observation, or the tap does not happen.
+    """
+
+    TYPE: ClassVar[str] = "tap"
+
+    name: str
+    at: tuple[float, float]
+    requires: tuple[Requirement, ...] = ()
+    max_observation_age_seconds: float = DEFAULT_TAP_MAX_OBSERVATION_AGE_SECONDS
+    enabled: bool = False
+
+    def __post_init__(self) -> None:
+        validate_skill_name(self.name)
+        object.__setattr__(self, "at", _tap_point(self.at, self.name))
+        if not isinstance(self.requires, tuple) or not all(
+            hasattr(item, "met") for item in self.requires
+        ):
+            raise SkillError(f"Skill {self.name!r}: requires must be a tuple of conditions.")
+        _require_positive_number(
+            self.max_observation_age_seconds,
+            f"Skill {self.name!r} max_observation_age_seconds",
+            60.0,
+        )
+        _require_bool(self.enabled, self.name)
+
+    def describe_point(self) -> str:
+        return f"({self.at[0] * 100:.0f}%, {self.at[1] * 100:.0f}%)"
+
+
+def _tap_point(value: object, skill_name: str) -> tuple[float, float]:
+    if not isinstance(value, list | tuple) or len(value) != 2:
+        raise SkillError(f"Skill {skill_name!r}: at must be [x, y] fractions of the window.")
+    point: list[float] = []
+    for part in value:
+        if (
+            isinstance(part, bool)
+            or not isinstance(part, int | float)
+            or not math.isfinite(part)
+            or not 0.0 <= part <= 1.0
+        ):
+            raise SkillError(
+                f"Skill {skill_name!r}: at values must be fractions between 0.0 and 1.0."
+            )
+        point.append(float(part))
+    return (point[0], point[1])
+
+
 def _require_bool(value: object, skill_name: str) -> None:
     if not isinstance(value, bool):
         raise SkillError(f"Skill {skill_name!r}: enabled must be true or false.")
 
 
-Skill: TypeAlias = ClickSkill | PressSkill | HoldSkill
+Skill: TypeAlias = ClickSkill | PressSkill | HoldSkill | TapSkill
 
 
 def permission_denial(skill: Skill, permissions: SkillPermissions) -> str | None:
@@ -296,6 +351,8 @@ class SkillBook:
 
         if isinstance(skill, ClickSkill):
             return _click_intent(skill, state, source, current, reason)
+        if isinstance(skill, TapSkill):
+            return _tap_intent(skill, state, source, current, reason)
         if isinstance(skill, PressSkill):
             intent = ActionIntent(
                 rule_name=source,
@@ -369,5 +426,31 @@ def _click_intent(
             f"{observation.confidence:.3f}"
         ),
         skill_name=skill.name,
+    )
+    return SkillIntentResult(skill.name, intent, "ok")
+
+
+def _tap_intent(
+    skill: TapSkill,
+    state: GameState,
+    source: str,
+    now: float,
+    reason: str | None,
+) -> SkillIntentResult:
+    unmet = unmet_requirement(
+        skill.requires, state, now=now, max_age_seconds=skill.max_observation_age_seconds
+    )
+    if unmet is not None:
+        return SkillIntentResult(skill.name, None, f"requires {unmet.describe()}: not met")
+    intent = ActionIntent(
+        rule_name=source,
+        action=TapSkill.TYPE,
+        detector_name="",
+        confidence=0.0,
+        target_bbox=None,
+        created_at=now,
+        reason=reason or f"skill {skill.name}: tap at {skill.describe_point()}",
+        skill_name=skill.name,
+        tap_point=skill.at,
     )
     return SkillIntentResult(skill.name, intent, "ok")
