@@ -1,4 +1,4 @@
-# Personal Game AI — User Guide (v1.1)
+# Personal Game AI — User Guide (v1.2)
 
 This guide takes you from a fresh checkout to a first supervised agent run.
 The target is Notepad, so nothing can go wrong in a game. It then shows how

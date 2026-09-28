@@ -18,25 +18,29 @@ file and `docs/PLAN.md` in the same push as the work.
 
 ## Right now (2026-09-28)
 
-**v1.2 "Taps + demo labels" (Issue #107) is in progress** on
-`feature/v1.2-tap-demos`, branched from `main` at 16f999e (v1.1.1 plus the
-one-skill-per-row fix, PR #106). Task 0 (kickoff) covers the issue, the
-branch, the `docs/PLAN.md` spec, the `AGENTS.md` tap invariant, the ROADMAP
-v1.2 → v2.0 outline and the draft release PR. The design came out of the real
-Pixel Dungeon ML test on 2026-09-28:
-- most moves are map taps, which no skill type can express;
-- the cursor left on a clicked button hides its template.
+**v1.2.0 "Taps + demo labels" (Issue #107) is released.** The integration
+branch `feature/v1.2-tap-demos` merged into `main` via PR #109 as a merge
+commit, which closed Issue #107. `main` has `APP_VERSION = "1.2.0"`.
 
-The user gave explicit permission on 2026-09-28 to merge PRs in this
-milestone.
+v1.2 work: kickoff PR #108; tap skill + `requires` + cursor restore PR #110;
+app wiring PR #111; demo labels PR #112; docs + example PR #113; the live
+smoke test (11/11 checks on Pixel Dungeon ML and Merchant Guilds, see
+`docs/PLAN.md` "Smoke test results") and the release close-out in the release
+PR.
 
-Pixel Dungeon has permadeath. Live tests there use harmless taps only,
-never fights.
+**Next: v1.3 imitation, first target Merchant Guilds** (an idle crafting /
+trading game in Google Play Games). The user wants the AI to copy how they
+play from recorded demos ("chỉ cần học cách tôi chơi và copy lại"). Planned
+design, not started: retrieval over the user's demos (screen thumbnail +
+patch around each recorded click; replay a click only when the patch matches;
+unknown screens do nothing), offline leave-one-session-out scoring, a dry-run
+mode, and a live mode behind every existing gate plus deny-zones for purchase
+buttons. No training and no downloads; the local `qwen3.5:9b` has vision.
 
-Task 3 (demo labeling) is done. `recording/labels.py` is pure: it maps
-recorded click, tap, press and hold inputs to profile skills and never imports
-the skill or input path. `scripts/recordings.py label` prints per-skill counts
-and can write guarded JSONL output.
+Real-game notes: Google Play Games windows include the Play Games side bar
+and title bar in the client area; keep the app beside the game (capture reads
+a screen region). Pixel Dungeon has permadeath and Merchant Guilds has
+purchase buttons: live tests use harmless taps only.
 
 **v1.1.0 "Meters" (Issue #92) is released.** The integration branch
 `feature/v1.1-meters` merged into `main` via PR #94 as a merge commit, which
@@ -532,14 +536,11 @@ instead of retained at zero confidence — two regression tests added. Realistic
 digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-state`;
 64/64 tests pass, ruff clean on the merged branch.
 
-### Active v1.2 work
-
-See the `docs/PLAN.md` checklist.
-
 ### Next task
 
-Tasks 1–3 (tap skill, cursor restore, demo labeling). After them come task 4
-(wiring) and task 6 (the live test on the user's machine).
+Kick off v1.3 imitation (issue, `feature/v1.3-...` branch, `docs/PLAN.md`
+spec with an imitation invariant). The user records Merchant Guilds demos
+with the app's Record button.
 
 Never commit a recording, a profile template PNG or any other user data,
 because the repo is public.
@@ -575,9 +576,9 @@ logs, secrets, or other user data (`.gitignore` covers `recordings/`,
 
 ### Open issue
 
-- **#107 — v1.2 Taps + demo labels** (active).
+None right now.
 
-Issue #92 (v1.1), #82 (v1.0), #71 (v0.8), #61 (v0.7), #50 (v0.6), #41 (v0.5), #15 (v0.4), #13 (old v0.4 model-foundation tracker), #1 (v0.3) and #4 are closed.
+Issue #107 (v1.2), #92 (v1.1), #82 (v1.0), #71 (v0.8), #61 (v0.7), #50 (v0.6), #41 (v0.5), #15 (v0.4), #13 (old v0.4 model-foundation tracker), #1 (v0.3) and #4 are closed.
 
 ## Lessons
 

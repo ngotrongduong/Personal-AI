@@ -1,6 +1,7 @@
 # v1.2 detailed plan — Taps + demo labels
 
-**Status: in progress** on `feature/v1.2-tap-demos` (Issue #107).
+**Status: released as v1.2.0** (`feature/v1.2-tap-demos` → `main` via PR
+#109, merge commit; Issue #107).
 
 v1.2 is the first step of the v1.2 → v2.0 track, which ends in an agent that
 learns from the user's own play (see `docs/ROADMAP.md`). Testing on a real
@@ -103,14 +104,14 @@ imitation work in v1.3 its data.
 
 | # | Task | Status | Owner | Notes |
 |---|------|--------|-------|-------|
-| 0 | Kickoff | In progress | Claude | Issue #107, `feature/v1.2-tap-demos`, this plan, tap invariant, HANDOFF/ROADMAP, draft release PR. |
+| 0 | Kickoff | Done (PR #108) | Claude | Issue #107, `feature/v1.2-tap-demos`, this plan, tap invariant, HANDOFF/ROADMAP, draft release PR. |
 | 1 | `tap` skill: skills/profile/intent/dispatcher + `requires` | Done (PR #110) | Codex + Claude | Tests for parsing, round-trip, fail-closed `requires`, foreground, bounds and hit-test gates. |
 | 2 | Cursor restore in `InputController.click` | Done (PR #110) | Codex + Claude | SetCursorPos + read-back before the click; restore outside the input lock, even when the click raises. |
-| 3 | Demo labeling (`recording/labels.py`, `recordings.py label`) | Done | Codex | Pure duck-typed labels, guarded atomic JSONL output, CLI/docs and synthetic tests. |
-| 4 | `main.py` wiring + safety review | Done | Claude | describe_skill, capture allow-list (only key skills run without capture), auto foreground check, Save Profile drops/logs taps whose `requires` detector is gone. Safety review: no Critical/Important. |
-| 5 | Docs + example | Done | Claude | USER_GUIDE "Tap skills" (fields, refusals, cursor restore); example profile gets a disabled `tap_centre` (no templates committed). Label docs came with task 3. |
-| 6 | Windows smoke test | To do | Claude | Pixel Dungeon ML: harmless taps only (no fights, permadeath); cursor restore fixes the LOST button. |
-| R | Release v1.2.0 | To do | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS/version, merge commit. |
+| 3 | Demo labeling (`recording/labels.py`, `recordings.py label`) | Done (PR #112) | Codex | Pure duck-typed labels, guarded atomic JSONL output, CLI/docs and synthetic tests. |
+| 4 | `main.py` wiring + safety review | Done (PR #111) | Claude | describe_skill, capture allow-list (only key skills run without capture), auto foreground check, Save Profile drops/logs taps whose `requires` detector is gone. Safety review: no Critical/Important. |
+| 5 | Docs + example | Done (PR #113) | Claude | USER_GUIDE "Tap skills" (fields, refusals, cursor restore); example profile gets a disabled `tap_centre` (no templates committed). Label docs came with task 3. |
+| 6 | Windows smoke test | Done | Claude | Pixel Dungeon ML and Merchant Guilds (Google Play Games), harmless taps only. 11/11 checks — see "Smoke test results". |
+| R | Release v1.2.0 | Done | Claude | CHANGELOG/README/ROADMAP/ARCHITECTURE/AGENTS/version; PR #109 as a merge commit. |
 
 ## Acceptance criteria
 
@@ -133,6 +134,37 @@ imitation work in v1.3 its data.
    `--out`.
 7. Existing v1.1 profiles and all earlier invariants are unchanged.
 8. Tests and ruff are clean; CI is green.
+
+## Smoke test results (2026-09-28)
+
+Run in-process through the real stack (`parse_profile` → `SkillBook` →
+`SkillExecutor` → `ActionDispatcher` → `InputController`) on the user's
+Windows 11 machine (4K, 150% scale), with games in Google Play Games. Only
+harmless taps on empty map/title areas; no fights, no purchases. Profiles and
+templates stayed local (gitignored).
+
+Pixel Dungeon ML (title screen):
+- PASS a tap whose `requires` needs `btn_wait` builds no intent on the title
+  screen (no Wait button there) — criterion 2;
+- PASS a tap with input control off is refused — criterion 3.
+
+Merchant Guilds (town map, tap at an empty forest spot, `at` [0.9, 0.8]):
+- PASS input off → "Input control is disabled.";
+- PASS another window in the foreground → "Target window is not the
+  foreground window; tap blocked.";
+- PASS a topmost window over the point, game in the foreground → "Tap point is
+  covered or off-screen; tap blocked.";
+- PASS the tap is dispatched ("Tapped (2364, 1666).") and the game screen is
+  unchanged;
+- PASS the cursor is back at its parked position after the tap;
+- PASS after F8 (input off) → refused;
+- PASS a click skill on a detected template is dispatched ("Clicked …");
+- PASS the cursor is restored after the click;
+- PASS the clicked template is detected again at confidence 1.00 on every
+  tick for 1.5 s without moving the mouse — criterion 5.
+
+All 8 acceptance criteria pass: 1, 2, 4, 6, 7 and 8 by the test suite and CI,
+3 and 5 also live above.
 
 ## Out of scope
 

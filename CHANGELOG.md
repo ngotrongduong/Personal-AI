@@ -2,8 +2,35 @@
 
 All notable project changes are tracked here.
 
-## Unreleased
+## v1.2.0 — Taps + demo labels
 
+The first step toward an agent that learns from the user's own play. Found
+while testing on real games (Pixel Dungeon ML, Merchant Guilds) in Google
+Play Games.
+
+- **`tap` skill type** (`agent/skills.py` `TapSkill`, `agent/profile.py`):
+  `{"type": "tap", "at": [fx, fy]}` clicks a fixed point given as fractions of
+  the captured window's client area — for map taps and buttons that no
+  template can pin down. The point only ever comes from the profile; the
+  model still picks a skill name only.
+- **Fail-closed `requires`** (`agent/skill_requirements.py`): up to 4 detector
+  or meter-threshold conditions that must hold on a fresh observation, or no
+  tap intent is built.
+- **Tap gates** (`agent/action_dispatcher.py`): input on / F8, freshness, the
+  captured window in the foreground, the point inside the live client area
+  and not covered by another window (`window_owns_point`), rate limit,
+  cancel.
+- **Cursor restore** (`core/input_controller.py`): every click checks that the
+  cursor reached the point before pressing, then moves the cursor back where
+  it was. A button the cursor used to hover over is detected again on the
+  next vision tick. The restore is a cursor move only.
+- **Demo labels** (`recording/labels.py`, `scripts/recordings.py label`): maps
+  a recording's clicks and keys to the profile's click, tap, press and hold
+  skills, counts the rest as `unlabeled`, and writes JSONL only with `--out`.
+- App wiring: the Skills panel shows `tap (58%, 47%)` and runs taps, the
+  planner prompt lists them, and Save Profile keeps them.
+- USER_GUIDE "Tap skills" and "Label your demos" sections; the example
+  profile has a disabled `tap_centre`.
 - **All skills visible again** (`main.py`, `SKILLS_PER_ROW`): the skills
   panel laid out two skills per row, and since the v1.1.1 layout the second
   column fell outside the narrower left panel, so every second skill was

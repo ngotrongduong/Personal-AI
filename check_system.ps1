@@ -1,4 +1,4 @@
-Write-Host "=== PersonalGameAI system check v1.1.1 ===" -ForegroundColor Cyan
+Write-Host "=== PersonalGameAI system check v1.2.0 ===" -ForegroundColor Cyan
 Write-Host ""
 
 Write-Host "Windows:" -ForegroundColor Yellow
