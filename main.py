@@ -94,6 +94,9 @@ from agent.vision_state_bridge import apply_detections
 from core.capture import WindowCapture
 from core.input_controller import InputController
 from core.window_utils import list_visible_windows, client_region, focus_window, is_foreground
+from imitation.demo_bank import DemoBank
+from imitation.policy import Abstention, ImitationPolicy, PolicyConfig, Proposal, in_deny_zone
+from imitation.runner import BankLoaded, ImitationRunner, PolicyOutcome
 from recording.recorder_controller import (
     DEFAULT_FPS as RECORDING_DEFAULT_FPS,
     MAX_FPS as RECORDING_MAX_FPS,
@@ -142,6 +145,45 @@ SKILLS_NONE_TEXT = "Skills: none. Load a profile to list its skills."
 # One per row: the v1.1.1 left column is too narrow for a second column of skills.
 SKILLS_PER_ROW = 1
 SKILL_NO_RESULT_TEXT = "—"
+
+# v1.3 Imitation panel.
+IMITATION_IDLE_TEXT = (
+    "Imitation: load a profile with an \"imitation\" block, then press Load Demos."
+)
+IMITATION_NO_OUTCOME_TEXT = "Last: —"
+# Executor source and rule name of imitation taps.
+IMITATION_SOURCE = "imitation"
+# Live mode turns off after this many failed or refused taps in a row.
+IMITATION_MAX_FAILURES = 3
+
+
+def imitation_policy_config(config) -> PolicyConfig:
+    """The policy settings of a profile's `imitation` block."""
+    return PolicyConfig(
+        k=config.k,
+        screen_threshold=config.screen_threshold,
+        patch_threshold=config.patch_threshold,
+        cooldown_seconds=config.cooldown_seconds,
+        deny_zones=tuple(config.deny_zones),
+    )
+
+
+def describe_demo_bank(bank: DemoBank, sessions: tuple[str, ...]) -> str:
+    """One status line: clicks, sessions and why other clicks were skipped."""
+    text = f"{len(bank.clicks)} demo clicks from {len(sessions)} recordings"
+    if bank.skipped:
+        skipped = ", ".join(f"{reason} {count}" for reason, count in sorted(bank.skipped.items()))
+        text += f" (skipped: {skipped})"
+    return text
+
+
+def describe_proposal(proposal: Proposal) -> str:
+    """Where a proposal taps and which recorded click it copies."""
+    return (
+        f"({proposal.fx:.3f}, {proposal.fy:.3f}) — screen {proposal.screen_similarity:.2f}, "
+        f"patch {proposal.patch_similarity:.2f}, votes {proposal.votes}, "
+        f"demo {proposal.demo_session} t={proposal.demo_t:.1f}s"
+    )
 
 
 def describe_skill(skill: Skill | None) -> str:
@@ -598,6 +640,32 @@ class PersonalGameAIApp:
             queue.SimpleQueue()
         )
 
+        # v1.3 imitation. The runner builds the demo bank and runs the policy
+        # on worker threads; everything else here is Tk-thread only. Live mode
+        # is never saved and always starts off.
+        self.imitation = ImitationRunner()
+        self._imitation_policy: ImitationPolicy | None = None
+        # The profile the bank belongs to, and the load still wanted.
+        self._imitation_profile: GameProfile | None = None
+        self._imitation_load_id: int | None = None
+        self._imitation_running = False
+        # The captured window imitation was started on; it acts nowhere else.
+        self._imitation_hwnd: int | None = None
+        self._imitation_last_run = 0.0
+        self._imitation_last_tap = 0.0
+        # True only after the live confirmation; the checkbox variable turns
+        # on before its dialog is answered, so it never decides on a tap.
+        self._imitation_live = False
+        # (fx, fy, monotonic time) of recent taps, for the per-target cooldown.
+        self._imitation_recent: list[tuple[float, float, float]] = []
+        self._imitation_failures = 0
+        # The submitted live tap; its drained run completes it.
+        self._imitation_intent: ActionIntent | None = None
+        self._imitation_last_abstain: str | None = None
+        self.imitation_status_var = tk.StringVar(value=IMITATION_IDLE_TEXT)
+        self.imitation_last_var = tk.StringVar(value=IMITATION_NO_OUTCOME_TEXT)
+        self.imitation_live_var = tk.BooleanVar(value=False)
+
         self._build_ui()
         self._switch_notebook(None)
         self.refresh_profiles()
@@ -1045,6 +1113,41 @@ class PersonalGameAIApp:
         ).pack(anchor="w", padx=8, pady=(0, 7))
         self._refresh_recording_controls()
 
+        imitation_box = ttk.LabelFrame(
+            outer,
+            text="Imitation — repeat your own recorded clicks (dry run unless Live is ticked)",
+        )
+        imitation_box.pack(fill="x", pady=(0, 8))
+
+        imitation_row = ttk.Frame(imitation_box)
+        imitation_row.pack(fill="x", padx=8, pady=(7, 4))
+        self.imitation_load_button = ttk.Button(
+            imitation_row, text="Load Demos", command=self.load_imitation_demos
+        )
+        self.imitation_load_button.pack(side="left")
+        self.imitation_start_button = ttk.Button(
+            imitation_row, text="Start", command=self.start_imitation
+        )
+        self.imitation_start_button.pack(side="left", padx=(8, 3))
+        self.imitation_stop_button = ttk.Button(
+            imitation_row, text="Stop", command=self.stop_imitation
+        )
+        self.imitation_stop_button.pack(side="left", padx=3)
+        self.imitation_live_check = ttk.Checkbutton(
+            imitation_row,
+            text="Live (send taps)",
+            variable=self.imitation_live_var,
+            command=self._toggle_imitation_live,
+        )
+        self.imitation_live_check.pack(side="left", padx=(15, 0))
+        ttk.Label(
+            imitation_box, textvariable=self.imitation_status_var
+        ).pack(anchor="w", padx=8, pady=(0, 2))
+        ttk.Label(
+            imitation_box, textvariable=self.imitation_last_var
+        ).pack(anchor="w", padx=8, pady=(0, 7))
+        self._refresh_imitation_controls()
+
     def _build_live_view(self, outer):
         info = ttk.Frame(outer)
         info.pack(fill="x", pady=(0, 2))
@@ -1143,6 +1246,8 @@ class PersonalGameAIApp:
         # A recording samples this capture's frames; it cannot outlive it.
         if self._request_recording_stop(RECORDING_STOP_CAPTURE):
             self.log("Recording stopped because capture stopped.")
+        # Imitation acts only on the window it was started on.
+        self._stop_imitation("capture stopped")
         if self.capture:
             self.capture.stop()
             self.capture = None
@@ -1184,6 +1289,7 @@ class PersonalGameAIApp:
             # Input is already off, so a held key is released; end the skill too.
             self.executor.cancel()
             self._disarm_auto("input control was disabled")
+            self._imitation_live_off("input control was disabled")
             if self._drop_effect_watch("input control was disabled"):
                 # The watched step is over; free the autopilot without counting it.
                 self.autopilot.reset()
@@ -1245,6 +1351,7 @@ class PersonalGameAIApp:
         self.executor.cancel()
         self.control_var.set(False)
         self.status_var.set("EMERGENCY STOP (F8)")
+        self._stop_imitation("of the emergency stop")
         planner_was_running = self.planner.is_running
         # Stopping the planner clears its mailbox; the pending proposal is
         # dropped and auto mode turns off.
@@ -1330,6 +1437,9 @@ class PersonalGameAIApp:
         if not started:
             self.log("Previous recording is still closing; try Record again in a moment.")
             return
+        # A recording holds only the player's input (input control is off
+        # here anyway); a dry run may keep going.
+        self._imitation_live_off("a recording started")
 
         self._recording_ui_state = "starting"
         self.recording_status_var.set(f"● REC starting at {fps:g} FPS…")
@@ -1415,6 +1525,349 @@ class PersonalGameAIApp:
             self._recording_ui_state = "idle"
             self.recording_status_var.set("Recording: stopped (final status not received).")
             self._refresh_recording_controls()
+
+    # ---------------- Imitation ----------------
+
+    def _imitation_recording_active(self) -> bool:
+        return self._recording_ui_state != "idle" or self.recorder.is_running
+
+    def _refresh_imitation_controls(self):
+        loaded = self._imitation_policy is not None
+        running = self._imitation_running
+        self.imitation_load_button.configure(
+            state="disabled" if running or self.imitation.loading else "normal"
+        )
+        self.imitation_start_button.configure(
+            state="normal" if loaded and not running else "disabled"
+        )
+        self.imitation_stop_button.configure(state="normal" if running else "disabled")
+        self.imitation_live_check.configure(state="normal" if running else "disabled")
+
+    def load_imitation_demos(self):
+        profile = self.profile
+        config = profile.imitation if profile is not None else None
+        if config is None:
+            messagebox.showwarning(
+                "Load Demos", 'Load a profile with an "imitation" block first.'
+            )
+            return
+        if self._imitation_running:
+            messagebox.showwarning("Load Demos", "Stop imitation before reloading its demos.")
+            return
+        load_id = self.imitation.load(self.recordings_dir, config.window_title, config.sessions)
+        if load_id is None:
+            self.log("Demos are still loading; try Load Demos again in a moment.")
+            return
+        self._imitation_policy = None
+        self._imitation_profile = profile
+        self._imitation_load_id = load_id
+        self.imitation_status_var.set(
+            f"Imitation: loading demos recorded on '{config.window_title}'…"
+        )
+        self._refresh_imitation_controls()
+
+    def _forget_imitation_demos(self):
+        """Drop the bank and ignore a load still running (a profile was loaded)."""
+        self._imitation_policy = None
+        self._imitation_profile = None
+        self._imitation_load_id = None
+        self.imitation_status_var.set(IMITATION_IDLE_TEXT)
+        self.imitation_last_var.set(IMITATION_NO_OUTCOME_TEXT)
+        self._refresh_imitation_controls()
+
+    def _drain_imitation(self):
+        for result in self.imitation.drain():
+            if isinstance(result, BankLoaded):
+                self._imitation_bank_loaded(result)
+            elif isinstance(result, PolicyOutcome):
+                self._imitation_outcome(result)
+        # Load Demos is re-enabled once the loader thread is done.
+        if self.imitation_load_button.instate(["disabled"]) and not self._imitation_running:
+            self._refresh_imitation_controls()
+
+    def _imitation_bank_loaded(self, result: BankLoaded):
+        profile = self._imitation_profile
+        if (
+            result.load_id != self._imitation_load_id
+            or profile is None
+            or profile is not self.profile
+            or profile.imitation is None
+        ):
+            return
+        self._imitation_load_id = None
+        if result.error is not None or result.bank is None:
+            self.imitation_status_var.set(f"Imitation: demos not loaded: {result.error}")
+            self.log(f"Imitation demos not loaded: {result.error}")
+            self._refresh_imitation_controls()
+            return
+        summary = describe_demo_bank(result.bank, result.sessions)
+        if not result.bank.clicks:
+            self.imitation_status_var.set(
+                f"Imitation: {summary}. Record yourself playing "
+                f"'{profile.imitation.window_title}' first."
+            )
+            self.log(f"Imitation: no usable demo clicks ({summary}).")
+            self._refresh_imitation_controls()
+            return
+        try:
+            policy = ImitationPolicy(result.bank, imitation_policy_config(profile.imitation))
+        except ValueError as exc:
+            self.imitation_status_var.set(f"Imitation: bad settings: {exc}")
+            self.log(f"Imitation settings rejected: {exc}")
+            self._refresh_imitation_controls()
+            return
+        self._imitation_policy = policy
+        self.imitation_status_var.set(f"Imitation: {summary}. Press Start for a dry run.")
+        self.log(f"Imitation demos loaded: {summary}.")
+        self._refresh_imitation_controls()
+
+    def start_imitation(self):
+        if self._imitation_running:
+            return
+        profile = self.profile
+        if (
+            self._imitation_policy is None
+            or profile is None
+            or profile is not self._imitation_profile
+            or profile.imitation is None
+        ):
+            messagebox.showwarning("Imitation", "Press Load Demos first.")
+            return
+        if self.capture is None:
+            messagebox.showwarning("Imitation", "Start Capture on the game window first.")
+            return
+        # The demos were recorded on one game; never compare them with another.
+        title = self._capture_title or ""
+        wanted = profile.imitation.window_title
+        if wanted.casefold() not in title.casefold():
+            messagebox.showwarning(
+                "Imitation",
+                f"The captured window '{title}' is not '{wanted}', the game these "
+                "demos were recorded on.",
+            )
+            return
+        self.imitation.reset()
+        self._imitation_running = True
+        self._imitation_hwnd = self.capture.hwnd
+        self._imitation_last_run = 0.0
+        self._imitation_last_tap = 0.0
+        self._imitation_recent.clear()
+        self._imitation_failures = 0
+        self._imitation_last_abstain = None
+        self._imitation_live = False
+        self.imitation_live_var.set(False)
+        self.imitation_last_var.set(IMITATION_NO_OUTCOME_TEXT)
+        self.log("Imitation STARTED as a dry run: it only logs what it would tap.")
+        self._refresh_imitation_controls()
+
+    def stop_imitation(self):
+        self._stop_imitation("you pressed Stop")
+
+    def _stop_imitation(self, why: str):
+        """End imitation: live off, pending proposals dropped. The bank is kept."""
+        was_running = self._imitation_running
+        self._imitation_live_off(why)
+        self._imitation_running = False
+        self._imitation_hwnd = None
+        self._imitation_recent.clear()
+        self._imitation_last_abstain = None
+        self.imitation.reset()
+        if was_running:
+            self.log(f"Imitation stopped because {why}.")
+        self._refresh_imitation_controls()
+
+    def _imitation_live_off(self, why: str):
+        self._imitation_failures = 0
+        was_live = self._imitation_live
+        self._imitation_live = False
+        self.imitation_live_var.set(False)
+        self._cancel_imitation_tap()
+        if was_live:
+            self.log(f"Imitation live mode OFF because {why}.")
+
+    def _cancel_imitation_tap(self):
+        """A submitted tap that has not reached the dispatcher yet sends nothing."""
+        # The executor runs one skill at a time, so while our tap is pending
+        # the running skill is that tap.
+        if self._imitation_intent is not None and self.executor.busy:
+            self.executor.cancel()
+
+    def _imitation_step_failed(self):
+        self._imitation_failures += 1
+        if self._imitation_failures >= IMITATION_MAX_FAILURES:
+            self._imitation_live_off(
+                f"{IMITATION_MAX_FAILURES} imitation taps in a row failed or were refused"
+            )
+
+    def _imitation_live_refusal(self) -> str | None:
+        """Why live mode may not tap right now; None when it may."""
+        profile = self.profile
+        if not self._imitation_running:
+            return "imitation is not running"
+        if not self.input.enabled:
+            return "input control is disabled"
+        if self._imitation_recording_active():
+            return "a recording is running"
+        if self.autopilot.mode == "auto":
+            return "planner auto mode is on"
+        if self.capture is None or self.capture.hwnd != self._imitation_hwnd:
+            return "the game window changed"
+        if profile is None or profile is not self._imitation_profile or profile.imitation is None:
+            return "the profile changed"
+        return None
+
+    def _toggle_imitation_live(self):
+        if not self.imitation_live_var.get():
+            self._imitation_failures = 0
+            self._imitation_live = False
+            self._cancel_imitation_tap()
+            self.log("Imitation live mode OFF: dry run only.")
+            return
+        # Until the confirmation below succeeds, outcomes stay dry-run.
+        self._imitation_live = False
+
+        def refuse(message: str):
+            self.imitation_live_var.set(False)
+            messagebox.showwarning("Imitation live", message)
+
+        refusal = self._imitation_live_refusal()
+        if refusal == "imitation is not running":
+            refuse("Start imitation first and watch its dry run.")
+            return
+        if refusal == "input control is disabled":
+            refuse("Enable keyboard/mouse control first.")
+            return
+        if refusal is not None:
+            refuse(f"Live mode is not possible: {refusal}.")
+            return
+        config = self.profile.imitation
+        generation, hwnd = self.imitation.generation, self._imitation_hwnd
+        if not messagebox.askyesno(
+            "Imitation live",
+            "Imitation will tap the game by itself, repeating your own recorded clicks "
+            f"on screens it recognises, at most once every {config.min_interval_seconds:g}s. "
+            f"It never taps the profile's {len(config.deny_zones)} deny-zones. Live mode "
+            f"turns off on F8, input off, profile load, recording start, planner auto mode, "
+            f"a window change or {IMITATION_MAX_FAILURES} failed taps in a row. Taps only "
+            "reach the game while its window is in the foreground.\n\nTurn live mode on?",
+        ):
+            self.imitation_live_var.set(False)
+            return
+        # The dialog runs the Tk loop: F8, input off, Stop or a window change
+        # may have happened meanwhile.
+        if (
+            self._imitation_live_refusal() is not None
+            or self.imitation.generation != generation
+            or self._imitation_hwnd != hwnd
+            or not self.imitation_live_var.get()
+        ):
+            self.imitation_live_var.set(False)
+            self.log("Imitation live mode NOT turned on: something changed while the confirmation was open.")
+            return
+        self._imitation_failures = 0
+        self._imitation_live = True
+        self.log("Imitation live mode ON: recognised screens get real taps. Press F8 to stop everything.")
+        # One focus change caused by this confirmation, like auto mode; the
+        # taps themselves never move the focus.
+        try:
+            if not focus_window(hwnd, settle_seconds=0.15):
+                self.log("Windows did not confirm the game window is in the foreground.")
+        except Exception as exc:
+            self.log(f"Could not focus the game window: {exc}")
+
+    def _poll_imitation(self, frame):
+        """At most one policy call per min_interval_seconds, while nothing else runs."""
+        if not self._imitation_running:
+            return
+        capture = self.capture
+        if capture is None or capture.hwnd != self._imitation_hwnd:
+            self._stop_imitation("the game window changed")
+            return
+        policy, profile = self._imitation_policy, self.profile
+        if policy is None or profile is None or profile.imitation is None:
+            self._stop_imitation("its demos are gone")
+            return
+        if frame is None or not self._capture_is_live():
+            return
+        now = time.monotonic()
+        config = profile.imitation
+        if (
+            now - self._imitation_last_run < config.min_interval_seconds
+            or now - self._imitation_last_tap < config.min_interval_seconds
+        ):
+            return
+        if self.imitation.proposing or self.executor.busy or self._imitation_intent is not None:
+            return
+        self._imitation_recent = [
+            tap for tap in self._imitation_recent if now - tap[2] < config.cooldown_seconds
+        ]
+        # The worker gets its own copy; the capture thread keeps producing frames.
+        if self.imitation.propose(policy, frame.copy(), now=now, recent=self._imitation_recent):
+            self._imitation_last_run = now
+
+    def _imitation_outcome(self, result: PolicyOutcome):
+        if not self._imitation_running or result.generation != self.imitation.generation:
+            return
+        if result.error is not None or result.outcome is None:
+            self.imitation_last_var.set(f"Last: policy error: {result.error}")
+            self.log(f"Imitation policy error: {result.error}")
+            self._stop_imitation("the policy failed")
+            return
+        outcome = result.outcome
+        if isinstance(outcome, Abstention):
+            self.imitation_last_var.set(f"Last: no tap — {outcome.reason}")
+            # Log only when the kind of abstention changes, not every score.
+            kind = outcome.reason.split(" (")[0]
+            if kind != self._imitation_last_abstain:
+                self._imitation_last_abstain = kind
+                self.log(f"Imitation: no tap — {outcome.reason}.")
+            return
+        self._imitation_last_abstain = None
+        text = describe_proposal(outcome)
+        if not self._imitation_live:
+            self.imitation_last_var.set(f"Last: would tap {text}")
+            self.log(f"Imitation (dry run): Would tap {text}.")
+            # The dry run follows the same cooldown as live taps.
+            self._imitation_recent.append((outcome.fx, outcome.fy, time.monotonic()))
+            return
+        self._submit_imitation_tap(outcome, text, observed_at=result.observed_at)
+
+    def _submit_imitation_tap(self, proposal: Proposal, text: str, *, observed_at: float):
+        refusal = self._imitation_live_refusal()
+        if refusal is not None:
+            self._imitation_live_off(refusal)
+            return
+        # The policy already skips deny-zones; this re-check runs right
+        # before the tap is submitted.
+        if in_deny_zone(proposal.fx, proposal.fy, self.profile.imitation.deny_zones):
+            refusal = "the point is in a deny-zone"
+        else:
+            now = time.monotonic()
+            intent = ActionIntent(
+                rule_name=IMITATION_SOURCE,
+                action="tap",
+                detector_name="",
+                confidence=0.0,
+                target_bbox=None,
+                # The frame's age: the dispatcher refuses a tap on a screen
+                # older than its freshness limit.
+                created_at=observed_at,
+                reason=f"imitation: tap {text}",
+                tap_point=(proposal.fx, proposal.fy),
+            )
+            refusal = self.executor.submit(
+                intent, hwnd=self._imitation_hwnd, source=IMITATION_SOURCE
+            )
+        if refusal is not None:
+            self.imitation_last_var.set(f"Last: tap refused — {refusal}")
+            self.log(f"Imitation tap REFUSED: {refusal}")
+            self._imitation_step_failed()
+            return
+        self._imitation_intent = intent
+        self._imitation_last_tap = now
+        self._imitation_recent.append((proposal.fx, proposal.fy, now))
+        self.imitation_last_var.set(f"Last: tapping {text}")
+        self.log(f"Imitation tap submitted: {text}.")
 
     # ---------------- Vision ----------------
 
@@ -1577,6 +2030,9 @@ class PersonalGameAIApp:
             return
 
         self._stop_planner_for("a profile was loaded")
+        # The demo bank and its settings belong to the old profile.
+        self._stop_imitation("a profile was loaded")
+        self._forget_imitation_demos()
         self.registry = registry
         self._detector_templates = kept
         self._registry_visibility.clear()
@@ -1842,6 +2298,14 @@ class PersonalGameAIApp:
                     f"{outcome}: {run.result.reason}",
                     completed=not run.result.interrupted,
                 )
+            if intent is not None and intent is self._imitation_intent:
+                self._imitation_intent = None
+                if run.result.dispatched:
+                    self._imitation_failures = 0
+                    self.imitation_last_var.set(f"Last: tapped — {run.result.reason}")
+                else:
+                    self.imitation_last_var.set(f"Last: tap blocked — {run.result.reason}")
+                    self._imitation_step_failed()
 
     def _toggle_planner(self):
         if not self.planner_enabled_var.get():
@@ -2252,6 +2716,7 @@ class PersonalGameAIApp:
             return
         self.autopilot.arm_auto(max_steps)
         self._auto_hwnd = target
+        self._imitation_live_off("planner auto mode was turned on")
         self._session_write("auto", on=True, reason="confirmed by the user", max_steps=max_steps)
         self.log(
             f"Auto mode ON: up to {max_steps} planner steps without approval. "
@@ -3144,11 +3609,13 @@ class PersonalGameAIApp:
         self._drain_recording_status()
         self._sync_recording_state()
         self._drain_skill_runs()
+        self._drain_imitation()
         self._drain_planner_queue()
         self._drain_agent_queue()
         self._sync_notes()
         self._poll_planner_proposals()
 
+        frame = None
         if self.capture:
             frame = self.capture.latest_frame()
             self.fps_var.set(f"Capture: {self.capture.actual_fps:.1f} FPS")
@@ -3167,6 +3634,7 @@ class PersonalGameAIApp:
         # After vision, so this frame's observations count.
         self._poll_effect_watch()
         self._poll_agent_run()
+        self._poll_imitation(frame)
         self.root.after(33, self._poll_preview)
 
     def _check_game_covered(self):
