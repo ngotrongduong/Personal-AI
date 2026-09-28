@@ -17,6 +17,7 @@ OBSERVATION_MODULES = (
     "agent/meter_live.py",
     "agent/skill_effects.py",
     "agent/agent_session.py",
+    "agent/skill_requirements.py",
 )
 FORBIDDEN = frozenset(
     {

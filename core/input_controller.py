@@ -1,9 +1,40 @@
 from __future__ import annotations
 
+import ctypes
 import threading
 import time
+from typing import Callable
 
 import pydirectinput
+
+
+CursorGetter = Callable[[], "tuple[int, int] | None"]
+CursorSetter = Callable[[int, int], None]
+# Let the game read the click at the target before the cursor moves back.
+CURSOR_RESTORE_DELAY_SECONDS = 0.05
+
+
+class _Point(ctypes.Structure):
+    _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+
+def get_cursor_pos() -> tuple[int, int] | None:
+    """The cursor's screen position, or None if Windows cannot tell."""
+
+    point = _Point()
+    try:
+        if not ctypes.windll.user32.GetCursorPos(ctypes.byref(point)):
+            return None
+    except Exception:
+        return None
+    return (int(point.x), int(point.y))
+
+
+def set_cursor_pos(x: int, y: int) -> None:
+    """Move the cursor only. SetCursorPos sends no button or key event."""
+
+    if not ctypes.windll.user32.SetCursorPos(int(x), int(y)):
+        raise OSError("SetCursorPos failed.")
 
 
 class InputController:
@@ -12,8 +43,17 @@ class InputController:
     release them without interfering with keys the user is physically holding.
     """
 
-    def __init__(self):
+    def __init__(
+        self,
+        *,
+        cursor_getter: CursorGetter = get_cursor_pos,
+        cursor_setter: CursorSetter = set_cursor_pos,
+        restore_delay_seconds: float = CURSOR_RESTORE_DELAY_SECONDS,
+    ):
         pydirectinput.PAUSE = 0.0
+        self._get_cursor = cursor_getter
+        self._set_cursor = cursor_setter
+        self._restore_delay = max(0.0, float(restore_delay_seconds))
         self.enabled = False
         self._keys_down: set[str] = set()
         self._mouse_down: set[str] = set()
@@ -50,10 +90,55 @@ class InputController:
                 self._keys_down.discard(key)
 
     def click(self, x: int | None = None, y: int | None = None, button: str = "left") -> None:
-        with self._lock:
-            if not self.enabled:
-                raise RuntimeError("Input control is disabled.")
-            pydirectinput.click(x=x, y=y, button=button)
+        """Click, then put the cursor back where it was (v1.2).
+
+        A cursor left on a button can hover-highlight it and change how it
+        looks, which breaks template matching of that button.
+
+        With a point, the cursor is placed with SetCursorPos and read back;
+        the click is refused unless it is exactly there. pydirectinput's own
+        move treats a 0 coordinate as "keep the cursor's", and it scales to the
+        primary monitor only, so it is never given the point.
+        """
+
+        original: tuple[int, int] | None = None
+        try:
+            with self._lock:
+                if not self.enabled:
+                    raise RuntimeError("Input control is disabled.")
+                original = self._read_cursor()
+                if x is not None or y is not None:
+                    self._place_cursor(x, y)
+                pydirectinput.click(button=button)
+        finally:
+            # A cursor move only, outside the lock so F8 is never delayed.
+            if original is not None:
+                self._restore_cursor(original)
+
+    def _read_cursor(self) -> tuple[int, int] | None:
+        try:
+            return self._get_cursor()
+        except Exception:
+            return None
+
+    def _place_cursor(self, x: int | None, y: int | None) -> None:
+        if x is None or y is None:
+            raise RuntimeError("A click point needs both x and y; click blocked.")
+        target = (int(x), int(y))
+        try:
+            self._set_cursor(*target)
+        except Exception as exc:
+            raise RuntimeError(f"Could not move the cursor; click blocked: {exc}") from exc
+        if self._read_cursor() != target:
+            raise RuntimeError("The cursor did not reach the click point; click blocked.")
+
+    def _restore_cursor(self, position: tuple[int, int]) -> None:
+        try:
+            if self._restore_delay:
+                time.sleep(self._restore_delay)
+            self._set_cursor(position[0], position[1])
+        except Exception:
+            pass
 
     def release_all(self) -> None:
         with self._lock:
