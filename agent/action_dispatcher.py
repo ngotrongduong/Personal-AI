@@ -11,7 +11,7 @@ import time
 import pydirectinput
 
 from core.input_controller import InputController
-from core.window_utils import client_region, is_foreground
+from core.window_utils import client_region, is_foreground, window_owns_point
 
 from .rule_engine import ActionIntent
 from .skills import PRESS_SECONDS, SkillPermissions
@@ -31,6 +31,8 @@ class DispatchResult:
 RegionResolver = Callable[[int], tuple[int, int, int, int]]
 PermissionsProvider = Callable[[], SkillPermissions | None]
 ForegroundChecker = Callable[[int], bool]
+# (hwnd, screen_x, screen_y) -> the point shows that window right now.
+PointChecker = Callable[[int, int, int], bool]
 
 KEY_ACTIONS = frozenset({"press", "hold"})
 # How often a running hold re-checks its cancel event, the input switch and
@@ -53,6 +55,10 @@ class ActionDispatcher:
        stale intents describe a game state that may no longer be true.
     4. The target is valid:
        - click: the intent has a bbox and the window's client rect resolves;
+       - tap (v1.2): the intent carries a point of fractions in [0, 1], a
+         profile's permissions are loaded, the client rect resolves to a
+         non-empty area that contains the point, the window is the
+         foreground window, and the point is not covered by another window;
        - press / hold (v0.6 key skills): a window is selected, the loaded
          profile's permissions allow the key (and the hold time), the key is
          one pydirectinput knows, and the window is the foreground window, so
@@ -72,7 +78,7 @@ class ActionDispatcher:
     See docs/ARCHITECTURE.md for the full runtime-loop diagram this sits in.
     """
 
-    SUPPORTED_ACTIONS = frozenset({"click"}) | KEY_ACTIONS
+    SUPPORTED_ACTIONS = frozenset({"click", "tap"}) | KEY_ACTIONS
 
     def __init__(
         self,
@@ -82,6 +88,7 @@ class ActionDispatcher:
         region_resolver: RegionResolver = client_region,
         permissions_provider: PermissionsProvider | None = None,
         foreground_checker: ForegroundChecker = is_foreground,
+        point_checker: PointChecker = window_owns_point,
         known_keys: Collection[str] | None = None,
     ) -> None:
         if max_intent_age_seconds <= 0:
@@ -91,6 +98,7 @@ class ActionDispatcher:
         self._region_resolver = region_resolver
         self._permissions_provider = permissions_provider
         self._foreground_checker = foreground_checker
+        self._point_checker = point_checker
         self._known_keys = frozenset(
             pydirectinput.KEYBOARD_MAPPING if known_keys is None else known_keys
         )
@@ -146,7 +154,66 @@ class ActionDispatcher:
 
         if intent.action in KEY_ACTIONS:
             return self._dispatch_key(intent, hwnd, current, cancel_event)
+        if intent.action == "tap":
+            return self._dispatch_tap(intent, hwnd, current, cancel_event)
         return self._dispatch_click(intent, hwnd, current, cancel_event)
+
+    def _dispatch_tap(
+        self,
+        intent: ActionIntent,
+        hwnd: int | None,
+        current: float,
+        cancel_event: threading.Event | None,
+    ) -> DispatchResult:
+        point = _tap_fractions(intent.tap_point)
+        if point is None:
+            return DispatchResult(intent, False, "Tap intent has no valid point.")
+        if hwnd is None:
+            return DispatchResult(intent, False, "No target window selected.")
+        permissions = self._permissions()
+        if permissions is None:
+            return DispatchResult(
+                intent, False, "No profile permissions loaded; taps are blocked."
+            )
+
+        try:
+            left, top, right, bottom = self._region_resolver(hwnd)
+        except Exception as exc:
+            return DispatchResult(intent, False, f"Target window unavailable: {exc}")
+        width = right - left
+        height = bottom - top
+        if width <= 0 or height <= 0:
+            return DispatchResult(intent, False, "Target window has no client area.")
+        # Fractions in [0, 1] map to a pixel inside [left, right) x [top, bottom).
+        screen_x = left + min(int(point[0] * width), width - 1)
+        screen_y = top + min(int(point[1] * height), height - 1)
+
+        if not self._is_foreground(hwnd):
+            return DispatchResult(
+                intent,
+                False,
+                "Target window is not the foreground window; tap blocked.",
+            )
+        if not self._owns_point(hwnd, screen_x, screen_y):
+            return DispatchResult(
+                intent, False, "Tap point is covered or off-screen; tap blocked."
+            )
+
+        refusal = self._admit(permissions, current)
+        if refusal is not None:
+            return DispatchResult(intent, False, refusal)
+
+        if cancel_event is not None and cancel_event.is_set():
+            self._forget(current)
+            return DispatchResult(intent, False, "Cancelled before the tap was sent.")
+
+        try:
+            self._input.click(screen_x, screen_y)
+        except RuntimeError as exc:
+            self._forget(current)
+            return DispatchResult(intent, False, str(exc))
+
+        return DispatchResult(intent, True, f"Tapped ({screen_x}, {screen_y}).")
 
     def _dispatch_click(
         self,
@@ -365,6 +432,26 @@ class ActionDispatcher:
             return bool(self._foreground_checker(hwnd))
         except Exception:
             return False
+
+    def _owns_point(self, hwnd: int, x: int, y: int) -> bool:
+        try:
+            return bool(self._point_checker(hwnd, x, y))
+        except Exception:
+            return False
+
+
+def _tap_fractions(value: object) -> tuple[float, float] | None:
+    if not isinstance(value, tuple) or len(value) != 2:
+        return None
+    for part in value:
+        if (
+            isinstance(part, bool)
+            or not isinstance(part, int | float)
+            or not math.isfinite(part)
+            or not 0.0 <= part <= 1.0
+        ):
+            return None
+    return (float(value[0]), float(value[1]))
 
 
 def _rate_window(max_actions_per_second: float) -> tuple[int, float]:

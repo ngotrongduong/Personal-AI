@@ -66,6 +66,26 @@ def is_foreground(hwnd: int) -> bool:
         return False
 
 
+GA_ROOT = 2
+
+
+def window_owns_point(hwnd: int, x: int, y: int) -> bool:
+    """True only if the screen point (x, y) shows `hwnd` (or one of its child
+    windows) right now; False on any error.
+
+    Catches a point covered by an always-on-top window, or off every monitor.
+    """
+    if not hwnd:
+        return False
+    try:
+        under = win32gui.WindowFromPoint((int(x), int(y)))
+        if not under:
+            return False
+        return win32gui.GetAncestor(under, GA_ROOT) == win32gui.GetAncestor(hwnd, GA_ROOT)
+    except Exception:
+        return False
+
+
 def focus_window(hwnd: int, settle_seconds: float = 0.12) -> bool:
     """Bring a normal desktop window to the foreground for user-initiated input testing."""
     if not win32gui.IsWindow(hwnd):

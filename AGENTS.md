@@ -188,7 +188,9 @@ Meter invariant (permanent from v1.1):
 
 Tap invariant (permanent from v1.2):
 - A tap point comes only from the loaded profile (`at`, fractions of the client area). The LLM chooses a skill name only; it never supplies or changes a point.
-- A tap runs only while the captured window is the foreground window, only when every `requires` condition holds on a fresh observation (fail closed), and only at a point inside the live client area.
+- A tap runs only while the captured window is the foreground window, only when every `requires` condition holds on a fresh observation (fail closed), and only at a point inside the live client area that is not covered by another window (hit-tested right before the click).
+- A click at a point places the cursor with SetCursorPos and reads it back; if the cursor is not exactly at the point, nothing is clicked.
+- A `requires` "gone" condition holds only when the detector is freshly observed as not visible; a weak visible detection is not "gone".
 - Taps use the same path and gates as every skill: SkillExecutor -> ActionDispatcher -> InputController, input on/F8, freshness, rate limit, cancel, disabled by default.
 - Restoring the cursor after a click is a cursor move only, never a button or key event.
 - Demo labeling only reads recordings and profiles; it never sends input or edits a profile, and nothing acts on labels.
