@@ -402,6 +402,31 @@ meters, thresholds and rule targets, and a meter rule still runs through
 SkillExecutor → ActionDispatcher → InputController. The boundary tests check
 that the meter modules never import the input path.
 
+## v1.2 taps and demo labels
+
+```text
+profile tap skill {"at": [fx, fy], "requires": [...]}
+  └─ SkillBook.build_intent ── requires on a fresh observation? ──► no intent
+       └─ ActionIntent(action="tap", tap_point=(fx, fy))
+            └─ SkillExecutor ──► ActionDispatcher._dispatch_tap
+                 input on · fresh · client area · foreground · window_owns_point
+                 · rate limit · cancel ──► InputController.click
+                      SetCursorPos + read-back ──► click ──► restore cursor
+recording + profile ──► recording/labels.py ──► per-skill counts / JSONL (--out)
+```
+
+- `agent/skill_requirements.py` parses and evaluates `requires` (detector
+  visibility or meter thresholds) and fails closed; it never imports the
+  input path.
+- `core/window_utils.window_owns_point` refuses a point covered by another
+  window or off every monitor.
+- `InputController.click` refuses to press when the cursor did not reach the
+  point, and always moves it back afterwards (a move only, no button).
+- `recording/labels.py` only reads a recording and a profile.
+
+Tap invariant: the profile is the only source of a tap point; the model picks
+only a skill name. See `AGENTS.md`.
+
 ## Why the LLM is not in the fast loop
 
 The local LLM sits above the deterministic rule layer. It can choose goals or

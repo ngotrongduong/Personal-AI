@@ -1,9 +1,23 @@
-# Personal Game AI v1.1.1
+# Personal Game AI v1.2.0
 
-Current release: **v1.1 — Meters**. New here? Start with
+Current release: **v1.2 — Taps + demo labels**. New here? Start with
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), which goes from install to a first
 supervised agent run on Notepad. See `CHANGELOG.md` for the full history and
 `docs/ARCHITECTURE.md` for the runtime design.
+
+## v1.2 at a glance
+
+- **Tap skills.** `{"type": "tap", "at": [0.58, 0.47]}` clicks a fixed point
+  of the game window (fractions of its client area) — map taps and fixed
+  buttons in touch games. The point comes only from your profile.
+- **`requires`**: a tap runs only when its detector / meter conditions hold on
+  a fresh frame, only while the game is in the foreground, and never when
+  another window covers the point.
+- **Cursor restore:** after any click the cursor goes back where it was, so
+  the clicked button is recognized again right away.
+- **Label your demos:** `python scripts/recordings.py label <session>
+  profiles/<game>` shows which of your recorded clicks and keys match which
+  skills — the data for the imitation work in v1.3.
 
 ## v1.1 at a glance
 
@@ -274,5 +288,5 @@ or protected-process evasion.
 
 ## Next milestone
 
-See `docs/ROADMAP.md`. v1.1 (Meters) is released. Later work (multiple
-templates, OCR, imitation-learning experiments) is listed there.
+See `docs/ROADMAP.md`. v1.2 (Taps + demo labels) is released. Next is v1.3,
+imitation: copying how you play from your recorded demos.

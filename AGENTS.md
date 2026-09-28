@@ -50,7 +50,7 @@ Build a local Windows game-playing assistant that observes the screen, maintains
 ## Git workflow
 
 - `main` is the tested baseline.
-- Active integration branch: `feature/v1.2-tap-demos` (Issue #107). The last one, `feature/v1.1-meters` (Issue #92), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
+- No active integration branch right now. The last one, `feature/v1.2-tap-demos` (Issue #107), landed on `main` as a merge commit. A new milestone gets its own `feature/<milestone>` branch.
 - New work goes to `feature/*` branches (or a sub-branch of the active integration branch, see below).
 
 ### Multi-AI coordination
@@ -94,10 +94,10 @@ feature/<milestone>
 
 ## Current priority
 
-v1.2 "Taps + demo labels" (Issue #107) is in progress on
-`feature/v1.2-tap-demos`. It adds a `tap` skill type (a fixed point from the
-profile), restores the cursor after clicks, and labels recorded demos with
-profile skills. See `docs/PLAN.md`.
+v1.2 "Taps + demo labels" (Issue #107) is released on `main`. It adds a
+`tap` skill type (a fixed point from the profile), restores the cursor after
+clicks, and labels recorded demos with profile skills. Next is v1.3
+imitation (see `docs/ROADMAP.md`).
 
 v1.1 "Meters" (Issue #92) is released on `main`. It wires the existing
 resource-bar measurement into profiles, GameState, rules, expectations, stop

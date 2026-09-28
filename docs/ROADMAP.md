@@ -129,6 +129,15 @@
 - Live-smoke-tested on Windows with `scripts/meter_demo.py` and Ollama
   `qwen3.5:9b`: 46/46 checks, all 9 acceptance criteria passed.
 
+### Stage 11 — Taps + demo labels (v1.2, Issue #107)
+- A `tap` skill type: a fixed profile point, fail-closed `requires`,
+  foreground- and hit-test-gated.
+- The cursor is restored after every click, so a clicked button is detected
+  again at once.
+- `scripts/recordings.py label` maps recorded input to profile skills.
+- Live-smoke-tested on Pixel Dungeon ML and Merchant Guilds (Google Play
+  Games): 11/11 checks, all 8 acceptance criteria passed.
+
 ## Next: learning from the user's play (v1.2 → v2.0)
 
 The long-term goal is an agent that watches the user play a game for a while.
@@ -137,15 +146,17 @@ own mistakes, writes down lessons and proposes improvements to its profile.
 Each step keeps every earlier invariant. The AI never grants itself keys,
 points or permissions; F8 always stops everything.
 
-- **v1.2 — Taps + demo labels (Issue #107, in progress).**
-  - A `tap` skill type: a fixed point from the profile, fail-closed
-    `requires`, foreground-gated.
-  - The cursor is restored after clicks.
-  - `scripts/recordings.py label` maps recorded input to profile skills.
-- **v1.3 — Imitation policy.**
-  - A small offline model trained on labeled demos. There are no downloads.
-  - It proposes skill *names* through the same planner gates, alongside or
-    instead of the LLM.
+- **v1.2 — Taps + demo labels (Issue #107, released).**
+- **v1.3 — Imitation (first target: Merchant Guilds).**
+  - Copy the user's own play: for each recorded click, keep what the screen
+    looked like; at run time, find the most similar demo screen, check the
+    area around the recorded click still matches, and repeat that click.
+    Unknown screens do nothing.
+  - Offline scoring on the user's demos (leave-one-session-out) before any
+    live use; a dry-run mode that only shows what it would do; live mode
+    behind every existing gate, off by default.
+  - No training, no downloads. The local `qwen3.5:9b` model has vision and
+    may later describe what each demo click meant.
 - **v1.4 — Self-review.**
   - After a run, it summarizes failures such as `not_seen` effects, blocked
     steps and meter drops.
