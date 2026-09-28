@@ -547,8 +547,9 @@ digit reads verified at 0.93+ confidence. Squash-merged into `feature/v0.3-game-
 
 ### Next task
 
-v1.3 tasks 1–4 (`imitation/` package, eval script, profile block) go to
-Codex; task 5 (main.py wiring) and task 6 (real demos + smoke) are Claude's.
+v1.3 tasks 1–4 (`imitation/` package, eval script, profile block) are complete
+in the Codex worktree and pending Claude's commit/PR. Task 5 (main.py wiring)
+and task 6 (real demos + smoke) are Claude's.
 The user records Merchant Guilds demos with the app's Record button.
 
 Never commit a recording, a profile template PNG or any other user data,

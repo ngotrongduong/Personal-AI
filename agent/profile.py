@@ -17,7 +17,7 @@ import math
 from pathlib import Path, PurePosixPath, PureWindowsPath
 import re
 from types import MappingProxyType
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import cv2
 import numpy as np
@@ -42,6 +42,9 @@ from .skills import (
     TapSkill,
 )
 
+if TYPE_CHECKING:
+    from imitation.policy import PolicyConfig
+
 
 PROFILE_FILENAME = "profile.json"
 TEMPLATES_DIRNAME = "templates"
@@ -50,7 +53,17 @@ FORMAT_VERSION = 1
 _NAME_PATTERN = re.compile(r"[A-Za-z0-9_.-]{1,64}")
 _SLUG_INVALID = re.compile(r"[^a-z0-9_-]+")
 
-_TOP_FIELDS = {"format_version", "name", "permissions", "detectors", "meters", "skills", "rules", "planner"}
+_TOP_FIELDS = {
+    "format_version",
+    "name",
+    "permissions",
+    "detectors",
+    "meters",
+    "skills",
+    "rules",
+    "planner",
+    "imitation",
+}
 _PERMISSION_FIELDS = {"allowed_keys", "max_hold_seconds", "max_actions_per_second"}
 _DETECTOR_FIELDS = {"name", "template", "threshold", "roi"}
 _METER_FIELDS = {
@@ -63,6 +76,16 @@ _METER_FIELDS = {
     "min_confidence",
 }
 _HSV_RANGE_FIELDS = {"lower", "upper"}
+_IMITATION_FIELDS = {
+    "window_title",
+    "sessions",
+    "k",
+    "screen_threshold",
+    "patch_threshold",
+    "cooldown_seconds",
+    "min_interval_seconds",
+    "deny_zones",
+}
 _SKILL_FIELDS = {
     ClickSkill.TYPE: {
         "name",
@@ -157,6 +180,31 @@ class RuleDefinition:
 
 
 @dataclass(frozen=True, slots=True)
+class ImitationConfig:
+    """Profile-owned selection and safety settings for recorded-click retrieval."""
+
+    window_title: str
+    sessions: tuple[str, ...] = ()
+    k: int = 5
+    screen_threshold: float = 0.92
+    patch_threshold: float = 0.8
+    cooldown_seconds: float = 3.0
+    min_interval_seconds: float = 1.5
+    deny_zones: tuple[tuple[float, float, float, float], ...] = ()
+
+    def policy_config(self) -> PolicyConfig:
+        from imitation.policy import PolicyConfig
+
+        return PolicyConfig(
+            k=self.k,
+            screen_threshold=self.screen_threshold,
+            patch_threshold=self.patch_threshold,
+            cooldown_seconds=self.cooldown_seconds,
+            deny_zones=self.deny_zones,
+        )
+
+
+@dataclass(frozen=True, slots=True)
 class GameProfile:
     name: str
     directory: Path
@@ -171,6 +219,7 @@ class GameProfile:
         default_factory=lambda: MappingProxyType({})
     )
     meters: tuple[MeterDefinition, ...] = ()
+    imitation: ImitationConfig | None = None
 
     def skill_book(self) -> SkillBook:
         """A fresh `SkillBook`; skills start with their profile `enabled` flag."""
@@ -267,6 +316,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
         check_goal_detector(planner.stop_when, detector_names, meter_names)
     except (TypeError, ValueError) as error:
         raise ProfileError(f"Invalid planner block: {error}") from error
+    imitation = _parse_imitation(top["imitation"]) if "imitation" in top else None
 
     return GameProfile(
         name=name,
@@ -278,6 +328,7 @@ def parse_profile(data: object, directory: str | Path) -> GameProfile:
         planner=planner,
         expectations=MappingProxyType(expectations),
         meters=meters,
+        imitation=imitation,
     )
 
 
@@ -413,6 +464,88 @@ def _parse_hsv_triplet(value: object, label: str) -> tuple[int, int, int]:
         if not 0 <= channel <= 255:
             raise ProfileError(f"{label} {channel_name} must be between 0 and 255.")
     return (hue, saturation, brightness)
+
+
+def _parse_imitation(value: object) -> ImitationConfig:
+    block = _require_object(value, "imitation")
+    _reject_unknown(block, _IMITATION_FIELDS, "imitation")
+
+    window_title = block.get("window_title")
+    if not isinstance(window_title, str) or not window_title.strip():
+        raise ProfileError("imitation.window_title must be a non-empty string.")
+
+    raw_sessions = _require_list(block.get("sessions", []), "imitation.sessions")
+    sessions: list[str] = []
+    for index, session in enumerate(raw_sessions):
+        if (
+            not isinstance(session, str)
+            or not session
+            or Path(session).name != session
+            or session in {".", ".."}
+            or "/" in session
+            or "\\" in session
+        ):
+            raise ProfileError(
+                f"imitation.sessions[{index}] must be a plain, non-empty folder name."
+            )
+        sessions.append(session)
+
+    k = block.get("k", 5)
+    if isinstance(k, bool) or not isinstance(k, int) or not 1 <= k <= 20:
+        raise ProfileError("imitation.k must be an integer from 1 to 20.")
+
+    screen_threshold = _require_number(
+        block.get("screen_threshold", 0.92), "imitation.screen_threshold"
+    )
+    patch_threshold = _require_number(
+        block.get("patch_threshold", 0.8), "imitation.patch_threshold"
+    )
+    for name, number in (
+        ("screen_threshold", screen_threshold),
+        ("patch_threshold", patch_threshold),
+    ):
+        if not 0.0 < number <= 1.0:
+            raise ProfileError(f"imitation.{name} must be greater than 0 and at most 1.")
+
+    cooldown_seconds = _require_number(
+        block.get("cooldown_seconds", 3.0), "imitation.cooldown_seconds"
+    )
+    if not 0.0 <= cooldown_seconds <= 60.0:
+        raise ProfileError("imitation.cooldown_seconds must be between 0 and 60.")
+    min_interval_seconds = _require_number(
+        block.get("min_interval_seconds", 1.5), "imitation.min_interval_seconds"
+    )
+    if not 0.5 <= min_interval_seconds <= 60.0:
+        raise ProfileError("imitation.min_interval_seconds must be between 0.5 and 60.")
+
+    raw_zones = _require_list(block.get("deny_zones", []), "imitation.deny_zones")
+    if len(raw_zones) > 16:
+        raise ProfileError("imitation.deny_zones may contain at most 16 zones.")
+    zones: list[tuple[float, float, float, float]] = []
+    for index, raw_zone in enumerate(raw_zones):
+        label = f"imitation.deny_zones[{index}]"
+        if not isinstance(raw_zone, list) or len(raw_zone) != 4:
+            raise ProfileError(f"{label} must be [x, y, width, height].")
+        x, y, width, height = (
+            _require_number(part, f"{label}[{part_index}]")
+            for part_index, part in enumerate(raw_zone)
+        )
+        if x < 0.0 or y < 0.0 or width <= 0.0 or height <= 0.0:
+            raise ProfileError(f"{label} must have x/y >= 0 and width/height > 0.")
+        if x + width > 1.0 or y + height > 1.0:
+            raise ProfileError(f"{label} must stay inside [0, 1].")
+        zones.append((x, y, width, height))
+
+    return ImitationConfig(
+        window_title=window_title,
+        sessions=tuple(sessions),
+        k=k,
+        screen_threshold=screen_threshold,
+        patch_threshold=patch_threshold,
+        cooldown_seconds=cooldown_seconds,
+        min_interval_seconds=min_interval_seconds,
+        deny_zones=tuple(zones),
+    )
 
 
 def _check_template_path(value: object, folder: Path, label: str) -> str:
@@ -666,6 +799,7 @@ def save_profile(
     permissions: SkillPermissions | None = None,
     planner: PlannerConfig | None = None,
     expectations: Mapping[str, ExpectationLike] | None = None,
+    imitation: ImitationConfig | None = None,
     overwrite: bool = False,
 ) -> Path:
     """Write a new profile folder under `root` and return its path.
@@ -716,6 +850,8 @@ def save_profile(
         "rules": [_rule_block(definition) for definition in rules],
         "planner": _planner_block(planner if planner is not None else PlannerConfig()),
     }
+    if imitation is not None:
+        data["imitation"] = _imitation_block(imitation)
     _validate_before_write(data, detector_blocks, meter_blocks)
 
     try:
@@ -794,6 +930,8 @@ def _validate_before_write(
         )
     except (TypeError, ValueError) as error:
         raise ProfileError(f"Invalid planner block: {error}") from error
+    if "imitation" in data:
+        _parse_imitation(data["imitation"])
 
 
 def _encode_png(template_bgr: np.ndarray, name: str) -> bytes:
@@ -825,6 +963,22 @@ def _meter_block(meter: MeterDefinition) -> dict[str, object]:
         "max_gap_slices": spec.max_gap_slices,
         "min_confidence": meter.min_confidence,
     }
+
+
+def _imitation_block(config: ImitationConfig) -> dict[str, object]:
+    block: dict[str, object] = {
+        "window_title": config.window_title,
+        "sessions": list(config.sessions),
+        "k": config.k,
+        "screen_threshold": config.screen_threshold,
+        "patch_threshold": config.patch_threshold,
+        "cooldown_seconds": config.cooldown_seconds,
+        "min_interval_seconds": config.min_interval_seconds,
+        "deny_zones": [list(zone) for zone in config.deny_zones],
+    }
+    # Reuse the strict loader validation for directly constructed configs.
+    _parse_imitation(block)
+    return block
 
 
 def _skill_block(

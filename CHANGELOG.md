@@ -2,6 +2,17 @@
 
 All notable project changes are tracked here.
 
+## Unreleased
+
+- Added the v1.3 read-only imitation foundation: screen and click-patch
+  features, validated demo extraction, deterministic retrieval with
+  screen/patch thresholds, deny-zones and target cooldowns.
+- Added leave-one-session-out and leave-one-click-out evaluation plus
+  `scripts/imitation.py bank|eval`; eval reports are optional, atomic and
+  guarded from recording files.
+- Added the strict optional profile `imitation` block and preserved it through
+  Save/Save As. Profiles without the block are unchanged.
+
 ## v1.2.0 — Taps + demo labels
 
 The first step toward an agent that learns from the user's own play. Found
