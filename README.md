@@ -1,5 +1,10 @@
 # Personal Game AI v1.2.0
 
+> **Paused (2026-09-29).** The owner stopped this project to focus only on
+> [Personal Arena](https://github.com/ngotrongduong/Personal-Arena). The code stays
+> as is: `main` is the v1.2.0 release; the unreleased v1.3 imitation work lives on
+> `feature/v1.3-imitation`. No further work is planned unless the owner restarts it.
+
 Current release: **v1.2 — Taps + demo labels**. New here? Start with
 [`docs/USER_GUIDE.md`](docs/USER_GUIDE.md), which goes from install to a first
 supervised agent run on Notepad. See `CHANGELOG.md` for the full history and
