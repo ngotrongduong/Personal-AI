@@ -10,6 +10,15 @@ meaningful chunk of work, **in the same push**, not as an afterthought (a doc
 pushed as a later, separate commit to an already-reviewed PR can be merged out
 from under you — it happened once already, see `docs/HANDOFF.md` "Lessons").
 
+## Authority (standing rule from the user, 2026-09-29)
+
+The user is not a programmer and only sets the project's direction. Claude (the
+orchestrator) has full authority over every technical decision and commands Codex and
+subagents. Agents never ask the user to approve or choose anything technical. They work
+until the task is done and report to Claude. Avoid commands that trigger permission
+prompts: one simple command per call, with no `cd &&`, pipes, heredocs or chained `$VAR`s.
+Put multi-step logic in a script file. The safety invariants below still always apply.
+
 ## Mission
 
 Build a local Windows game-playing assistant that observes the screen, maintains game state, and can perform safe mouse/keyboard actions for offline/single-player games or games that explicitly permit automation.
